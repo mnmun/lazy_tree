@@ -1,0 +1,37 @@
+[package]
+name = "lazy_tree"
+description = "a tree of lazily populated nodes with cursor-based traversal"
+version = "0.0.0"
+authors = ["mnmun <mnmnmun@proton.me>"]
+homepage = "https://github.com/mnmun/lazy_tree"
+repository = "https://github.com/mnmun/lazy_tree"
+readme = "README.md"
+exclude = ["diagrams", "flake.nix", "flake.lock"]
+license = "MIT"
+edition = "2024"
+
+[features]
+default = []
+
+#! This crate provides a set of optional features that can be enabled in your
+#! `Cargo.toml` file:
+
+## Each created [`node`] increments a global atomic counter. Dropping a [`node`]
+## decrements the counter. If the counter is not zero when the [`tree`] is
+## dropped, it indicates that some [`nodes`] were not deallocated, signaling a
+## memory leak with a panic.
+##
+## Note that [`trees`] share the same global [`node`] counter. If multiple
+## [`trees`] exist simultaneously, dropping one [`tree`] while another has alive
+## [`nodes`] will be flagged as a memory leak and cause a panic. Use this
+## feature in sequentually executed tests where only one [`tree`] exists at a
+## time.
+leak-detection = []
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+serial_test = "4.0.1"
+
+[dependencies]
+getset = "0.1.7"
+document-features = "0.2.12"

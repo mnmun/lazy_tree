@@ -54,7 +54,7 @@
 //!   the [`callback`]. `A` and its children remain available.
 //!
 //! Thus, a [`cursor`] moving downward leaves behind a path of populated
-//! [`nodes`] from the root to its current position.
+//! [`nodes`] from the [`tree's`] `root` to its current position.
 //!
 //! Now consider the reverse traversal, in which the [`cursor`] ascends through
 //! the [`tree`] (`(3)` → `(0)`):
@@ -74,7 +74,7 @@
 //!
 //! The crate provides the following main types:
 //!
-//! - [`Tree`] - owns the root [`node`] and creates [`cursors`] for traversal;
+//! - [`Tree`] - owns the `root` [`node`] and creates [`cursors`] for traversal;
 //! - [`Cursor`] - traverses and inspects the [`tree`];
 //! - [`Node`] - stores a [`value`], a [`link`] to its parent and links to its
 //!   currently populated children;
@@ -96,7 +96,7 @@
 //! ## Safety
 //!
 //! A [`tree`] can be shared between threads, and multiple [`cursors`] may
-//! traverse the same [`tree`] concurrently. Access to the root and to each
+//! traverse the same [`tree`] concurrently. Access to the `root` and to each
 //! [`node's`] traversal state is synchronized internally. Each [`cursor`] still
 //! borrows the [`tree`] for its entire lifetime and therefore cannot outlive
 //! the [`tree`] from which it was created.
@@ -115,9 +115,6 @@
 //!    LEFT-LEFT   LEFT-RIGHT RIGHT-LEFT  RIGHT-RIGHT
 //!       ...         ...         ...         ...
 //! ```
-//!
-//! [Here] you could find a more complex example of a JSON parser build on top
-//! of this crate.
 //!
 //! This example uses `&str` as the [`node`] [`value`] type and `Option<&str>` as
 //! the element type of the `source` collection. An absent value is represented
@@ -264,9 +261,13 @@
 //! assert_eq!(cursor.value(), "RIGHT-RIGHT");
 //! ```
 //!
+//! [Here] you could find a more complex example of a JSON parser build on top
+//! of this crate.
+//!
 //! ## Features
 //!
 //! [`tree`]: Tree
+//! [`tree's`]: Tree
 //! [`trees`]: Tree
 //! [`node`]: Node
 //! [`nodes`]: Node

@@ -24,7 +24,7 @@ Consider a single `cursor` descending through the `tree` (`(0)` → `(3)`):
 - `(2)`: The `cursor` descends from `ROOT` to `A` and visits `A`. Because this is the first `cursor` to visit `A`, its children are populated by the `callback`. `ROOT` and its children remain available;
 - `(3)`: The `cursor` descends from `A` to `D` and visits `D`. Because this is the first `cursor` to visit `D`, its children are populated by the `callback`. `A` and its children remain available.
 
-Thus, a `cursor` moving downward leaves behind a path of populated `nodes` from the root to its current position.
+Thus, a `cursor` moving downward leaves behind a path of populated `nodes` from the `tree's` `root` to its current position.
 
 Now consider the reverse traversal, in which the `cursor` ascends through the `tree` (`(3)` → `(0)`):
 
@@ -39,7 +39,7 @@ In other words, `nodes` populated during traversal are released automatically on
 
 The crate provides the following main types:
 
-- `Tree` - owns the root `node` and creates `cursors` for traversal;
+- `Tree` - owns the `root` `node` and creates `cursors` for traversal;
 - `Cursor` - traverses and inspects the `tree`;
 - `Node` - stores a `value`, a `link` to its parent and links to its currently populated children;
 - `Populate` - a function used to create a `node's` children when a `cursor` visits a `node` that is not currently visited by another `cursor`.
@@ -54,15 +54,13 @@ Many types in this crate use the following generic parameters:
 
 ## Safety
 
-A `tree` can be shared between threads, and multiple `cursors` may traverse the same `tree` concurrently. Access to the root and to each `node's` traversal state is synchronized internally. Each `cursor` still borrows the `tree` for its entire lifetime and therefore cannot outlive the `tree` from which it was created.
+A `tree` can be shared between threads, and multiple `cursors` may traverse the same `tree` concurrently. Access to the `root` and to each `node's` traversal state is synchronized internally. Each `cursor` still borrows the `tree` for its entire lifetime and therefore cannot outlive the `tree` from which it was created.
 
 ## Example
 
 The following example constructs a lazily populated binary `tree` from serialized data represented as `[ROOT, LEFT, RIGHT, LEFT-LEFT, LEFT-RIGHT, RIGHT-LEFT, RIGHT-RIGHT, ...]`:
 
 ![diagram_1](https://github.com/mnmun/lazy_tree/blob/main/diagrams/diagram_1.png?raw=true)
-
-[Here](https://github.com/mnmun/json) you could find a more complex example of a JSON parser build on top of this crate.
 
 This example uses `&str` as the `node` `value` type and `Option<&str>` as the element type of the `source` collection. An absent value is represented by `None`, which allows the `source` collection to describe missing nodes.
 
@@ -203,6 +201,8 @@ cursor.walk(Direction::Down(Target::First));
 assert_eq!(cursor.path(), &[0, 1, 0]);
 assert_eq!(cursor.value(), "RIGHT-RIGHT");
 ```
+
+[Here](https://github.com/mnmun/json) you could find a more complex example of a JSON parser build on top of this crate.
 
 ## Features
 

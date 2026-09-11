@@ -22,6 +22,8 @@ use getset::{Getters, MutGetters};
 pub type Link<'source, Value, Source, Error> =
     NonNull<Node<'source, Value, Source, Error>>;
 
+/// ![populate](https://github.com/mnmun/images/blob/main/maternity.png?raw=true)
+///
 /// # Callback used to create a [`node's`] children
 ///
 /// Invoked when a [`cursor`] enters a [`node`] whose children have not yet been

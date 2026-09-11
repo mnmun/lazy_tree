@@ -208,7 +208,7 @@ assert_eq!(cursor.value(), "RIGHT-RIGHT");
 
 This crate provides a set of optional features that can be enabled in your `Cargo.toml` file:
 
-- `*leak-detection*` - Each created `node` increments a global atomic counter. Dropping a `node` decrements the counter. If the counter is not zero when the `tree` is dropped, it indicates that some `nodes` were not deallocated, signaling a memory leak with a panic.
+- `leak-detection` - Each created `node` increments a global atomic counter. Dropping a `node` decrements the counter. If the counter is not zero when the `tree` is dropped, it indicates that some `nodes` were not deallocated, signaling a memory leak with a panic.
   Note that `trees` share the same global `node` counter. If multiple `trees` exist simultaneously, dropping one `tree` while another has alive `nodes` will be flagged as a memory leak and cause a panic. Use this feature in sequentually executed tests where only one `tree` exists at a time.
 
 ## License

@@ -5,6 +5,7 @@
     nixpkgs.url = "nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     import-cargo.url = "github:edolstra/import-cargo";
+    git-hooks.url = "github:cachix/git-hooks.nix";
   };
 
   outputs =
@@ -13,11 +14,87 @@
       nixpkgs,
       flake-utils,
       import-cargo,
+      git-hooks,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs { inherit system; };
+
+        testCmd =
+          {
+            profile,
+          }:
+          "${pkgs.cargo}/bin/cargo test --features debug --profile=${profile} --frozen --offline";
+
+        check =
+          { profile }:
+          git-hooks.lib.${system}.run {
+            src = ./.;
+
+            settings = {
+              rust = {
+                check.cargoDeps = pkgs.rustPlatform.importCargoLock {
+                  lockFile = ./Cargo.lock;
+                };
+                cargoManifestPath = "./Cargo.toml";
+              };
+            };
+
+            hooks = {
+              cargo-check = {
+                enable = true;
+              };
+
+              cargo-test = {
+                enable = true;
+                entry = testCmd { inherit profile; };
+                pass_filenames = false;
+                stages = [ "pre-commit" ];
+                verbose = true;
+                files = "\\.rs$|Cargo\\.toml$|Cargo\\.lock$";
+                excludes = [ "target/" ];
+              };
+
+              rustfmt = {
+                enable = true;
+                settings = {
+                  check = true;
+                  verbose = true;
+                  config = {
+                    max_width = 80;
+                  };
+                };
+              };
+
+              clippy = {
+                enable = true;
+                args = [ "-Dwarnings" ];
+              };
+
+              cargo-doc = {
+                enable = true;
+                entry = "cargo deadlinks";
+                extraPackages = [
+                  pkgs.cargo
+                  pkgs.cargo-deadlinks
+                ];
+                pass_filenames = false;
+                stages = [ "pre-commit" ];
+                verbose = true;
+                files = "\\.rs$|Cargo\\.toml$|Cargo\\.lock$";
+                excludes = [ "target/" ];
+              };
+
+              cargo-sort = {
+                enable = true;
+                args = [
+                  "--check"
+                  "--no-format"
+                ];
+              };
+            };
+          };
 
         lazy_tree =
           let
@@ -36,6 +113,7 @@
               with pkgs;
               [
                 cargo
+                cargo-deadlinks
               ]
               ++ (
                 if inShell then
@@ -51,16 +129,24 @@
                   ]
               );
 
-            target = "--release";
+            profile = if inShell then "dev" else "release";
+
             doCheck = true;
 
-            checkPhase = "cargo test ${target} --frozen --offline";
+            checkPhase = (check { inherit profile; }).shellHook;
+
             installPhase = ''
               mkdir -p $out
             '';
+
+            shellHook = if inShell then (check { inherit profile; }).shellHook else "";
           };
       in
       {
+        checks = {
+          pre-commit-check = check { profile = "release"; };
+        };
+
         packages.default = lazy_tree { };
         devShells.default = lazy_tree { inShell = true; };
       }

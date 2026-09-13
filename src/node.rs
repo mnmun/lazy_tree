@@ -14,6 +14,8 @@ use getset::{Getters, MutGetters};
 
 /// # [`NonNull`] pointer to a [`node`]
 ///
+/// ![link](https://github.com/mnmun/images/blob/main/chain.png?raw=true)
+///
 /// `Link` is used to connect a [`node`] with its parent and children.
 ///
 /// See [`crate`] for more information.
@@ -22,9 +24,9 @@ use getset::{Getters, MutGetters};
 pub type Link<'source, Value, Source, Error> =
     NonNull<Node<'source, Value, Source, Error>>;
 
-/// ![populate](https://github.com/mnmun/images/blob/main/maternity.png?raw=true)
-///
 /// # Callback used to create a [`node's`] children
+///
+/// ![populate](https://github.com/mnmun/images/blob/main/maternity.png?raw=true)
 ///
 /// Invoked when a [`cursor`] enters a [`node`] whose children have not yet been
 /// populated. This occurs when the [`node`] has no other [`cursors`] visiting
@@ -118,6 +120,8 @@ pub(crate) fn drop_link<'source, Value, Source, Error>(
 }
 
 /// # [`Node`] builder
+///
+/// ![builder](https://github.com/mnmun/images/blob/main/road_work.png?raw=true)
 ///
 /// Data required to build a [`node`]:
 ///
@@ -285,9 +289,9 @@ where
     }
 }
 
-/// ![node](https://github.com/mnmun/images/blob/main/cherry.png?raw=true)
-///
 /// # `Node`
+///
+/// ![node](https://github.com/mnmun/images/blob/main/cherry.png?raw=true)
 ///
 /// A `node` stores a [`value`] together with the `source` data and `range`
 /// metadata needed to create its children. `Nodes` are connected through

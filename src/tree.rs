@@ -33,9 +33,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "debug")]
 pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
 
-/// ![tree](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
-///
 /// # `Tree`
+///
+/// ![tree](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 ///
 /// `Tree` holds a [`link`] to the `root` [`node`] and can be created using
 /// [`Tree::new()`].

@@ -15,7 +15,9 @@ use getset::Getters;
 
 use crate::{Link, Node};
 
-/// Specifies which child [`node`] [`cursor`] selects when moving down
+/// # Specifies which child [`node`] [`cursor`] selects when moving down
+///
+/// ![target](https://github.com/mnmun/images/blob/main/target.png?raw=true)
 ///
 /// [`node`]: Node
 /// [`cursor`]: Cursor
@@ -29,6 +31,8 @@ pub enum Target {
 }
 
 /// # Specifies the direction of a [`cursor`] movement
+///
+/// ![direction](https://github.com/mnmun/images/blob/main/no_crossing.png?raw=true)
 ///
 /// See [`walk()`] and [`jump()`] for more information.
 ///
@@ -63,9 +67,9 @@ pub enum Direction {
     Right,
 }
 
-/// ![cursor](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
-///
 /// # `Cursor`
+///
+/// ![cursor](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
 ///
 /// `Cursor` stores a [`link`] to the [`node`] it currently visits and the
 /// absolute [`path`] from the [`tree's`] `root` to that [`node`].

@@ -262,7 +262,7 @@ where
     /// [`builder`]: Builder
     /// [`link`]: Link
     pub fn build(self) -> Link<'source, Value, Source, Error> {
-        #[cfg(feature = "leak-detection")]
+        #[cfg(feature = "debug")]
         {
             use crate::tree::NODES_ALIVE;
             use std::sync::atomic::Ordering;
@@ -500,7 +500,7 @@ where
     [Source]: ToOwned<Owned = Vec<Source>>,
 {
     fn drop(&mut self) {
-        #[cfg(feature = "leak-detection")]
+        #[cfg(feature = "debug")]
         {
             use crate::tree::NODES_ALIVE;
             use std::sync::atomic::Ordering;

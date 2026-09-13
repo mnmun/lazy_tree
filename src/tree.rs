@@ -14,7 +14,7 @@ use crate::{
     node::{Link, drop_link},
 };
 
-#[cfg(feature = "leak-detection")]
+#[cfg(feature = "debug")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// # Counts live [`nodes`]
@@ -30,7 +30,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// [`Node::drop()`]: crate::Node::drop()
 /// [`tree`]: crate::Tree
 /// [`Tree::drop()`]: crate::Tree::drop()
-#[cfg(feature = "leak-detection")]
+#[cfg(feature = "debug")]
 pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
 
 /// ![tree](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
@@ -117,7 +117,7 @@ where
     fn drop(&mut self) {
         drop_link(self.root);
 
-        #[cfg(feature = "leak-detection")]
+        #[cfg(feature = "debug")]
         {
             let remaining = NODES_ALIVE.load(Ordering::Acquire);
 

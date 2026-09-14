@@ -129,7 +129,11 @@
 //! use std::{borrow::Cow, ops::Range};
 //! use pretty_assertions::assert_eq;
 //!
-//! use lazy_tree::{Tree, Builder, Link, Direction, Target};
+//! use lazy_tree::{
+//!   Tree,
+//!   node::{Builder, Link},
+//!   cursor::{Direction, Target}
+//! };
 //!
 //! // The type of the value stored in each node
 //! type MyValue = str;
@@ -272,12 +276,12 @@
 //! [`node`]: Node
 //! [`nodes`]: Node
 //! [`node's`]: Node
-//! [`link`]: Link
+//! [`link`]: crate::node::Link
 //! [`cursor`]: Cursor
 //! [`cursor-based`]: Cursor
 //! [`cursors`]: Cursor
-//! [`callback`]: Populate
-//! [`population callback`]: Populate
+//! [`callback`]: crate::node::Populate
+//! [`population callback`]: crate::node::Populate
 //! [`value`]: Node::value()
 //! [Here]: https://github.com/mnmun/json
 //!
@@ -293,8 +297,8 @@ pub mod cursor;
 pub mod node;
 pub mod tree;
 
-pub use cursor::{Cursor, Direction, Target};
-pub use node::{Builder, Link, Node, Populate};
+pub use cursor::Cursor;
+pub use node::Node;
 pub use tree::Tree;
 
 #[cfg(test)]

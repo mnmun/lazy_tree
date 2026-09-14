@@ -13,7 +13,7 @@ use std::{marker::PhantomData, ops::Deref};
 
 use getset::Getters;
 
-use crate::{Link, Node};
+use crate::node::{Link, Node};
 
 /// # Specifies which child [`node`] [`cursor`] selects when moving down
 ///
@@ -268,8 +268,8 @@ where
     /// [`link`]: Link
     /// [`node`]: Node
     /// [`node's`]: Node
-    /// [`populated`]: crate::Populate
-    /// [`population`]: crate::Populate
+    /// [`populated`]: crate::node::Populate
+    /// [`population`]: crate::node::Populate
     pub(crate) fn new(
         link: Link<'source, Value, Source, Error>,
         path: Vec<usize>,
@@ -305,7 +305,7 @@ where
     /// [`node`]: Node
     /// [`node's`]: Node
     /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     pub fn go_to(&mut self, path: &[usize]) -> Result<bool, Error> {
         if path.is_empty() {
             return Ok(false);
@@ -433,7 +433,7 @@ where
     /// [`direction`]: Direction
     /// [`target`]: Target
     /// [`tree`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     pub fn walk(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
             Direction::Up => Ok(self.up()),
@@ -515,7 +515,7 @@ where
     /// [`nodes`]: Node
     /// [`tree`]: crate::Tree
     /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     pub fn jump(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
             Direction::Up => self.jump_up(),
@@ -538,7 +538,7 @@ where
     /// [`cursor`]: Cursor
     /// [`node`]: Node
     /// [`target`]: Target
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn down(&mut self, target: Target) -> Result<bool, Error> {
         let (children_len, child) = {
             let children = unsafe { &*self.children.get() };
@@ -577,7 +577,7 @@ where
     /// [`node`]: Node
     /// [`target`]: Target
     /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn jump_down(&mut self, target: Target) -> Result<bool, Error> {
         if !self.down(target)? {
             self.go_to(&[0])?;
@@ -620,7 +620,7 @@ where
     /// [`cursor`]: Cursor
     /// [`node`]: Node
     /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn jump_up(&mut self) -> Result<bool, Error> {
         if !self.up() {
             while self.down(Target::First)? {}
@@ -641,7 +641,7 @@ where
     /// [`cursor`]: Cursor
     /// [`node`]: Node
     /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn right(&mut self) -> Result<bool, Error> {
         unsafe {
             if let Some(parent) = self.link.as_ref().parent {
@@ -678,7 +678,7 @@ where
     /// [`cursor`]: Cursor
     /// [`node`]: Node
     /// [`tree`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn jump_right(&mut self) -> Result<bool, Error> {
         let initial_path_len = self.path.len();
 
@@ -729,7 +729,7 @@ where
     ///
     /// [`cursor`]: Cursor
     /// [`node`]: Node
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn left(&mut self) -> Result<bool, Error> {
         unsafe {
             if let Some(parent) = self.link.as_ref().parent {
@@ -768,7 +768,7 @@ where
     /// [`cursor`]: Cursor
     /// [`node`]: Node
     /// [`tree`]: crate::Tree
-    /// [`populating`]: crate::Populate
+    /// [`populating`]: crate::node::Populate
     fn jump_left(&mut self) -> Result<bool, Error> {
         let initial_path_len = self.path.len();
 

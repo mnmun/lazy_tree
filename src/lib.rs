@@ -293,6 +293,14 @@
 //! [MIT](https://github.com/mnmun/lazy_tree/blob/main/LICENSE)
 
 #![allow(dead_code)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
+#![deny(rustdoc::missing_crate_level_docs)]
+#![deny(rustdoc::invalid_codeblock_attributes)]
+#![deny(rustdoc::invalid_html_tags)]
+#![deny(rustdoc::invalid_rust_codeblocks)]
+#![deny(rustdoc::unescaped_backticks)]
+#![deny(rustdoc::redundant_explicit_links)]
 
 pub mod cursor;
 pub mod node;

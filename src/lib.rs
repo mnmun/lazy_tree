@@ -282,6 +282,7 @@
 //! [`cursors`]: Cursor
 //! [`callback`]: crate::node::Populate
 //! [`population callback`]: crate::node::Populate
+//! [`Populate`]: crate::node::Populate
 //! [`value`]: Node::value()
 //! [Here]: https://github.com/mnmun/json
 //!

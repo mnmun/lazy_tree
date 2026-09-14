@@ -26,7 +26,7 @@ pub type Link<'source, Value, Source, Error> =
 
 /// # Callback used to create a [`node's`] children
 ///
-/// ![populate](https://github.com/mnmun/images/blob/main/maternity.png?raw=true)
+/// ![populate](https://github.com/mnmun/images/blob/main/nursery.png?raw=true)
 ///
 /// Invoked when a [`cursor`] enters a [`node`] whose children have not yet been
 /// populated. This occurs when the [`node`] has no other [`cursors`] visiting

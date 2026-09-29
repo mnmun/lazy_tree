@@ -1,116 +1,111 @@
-//! # Lazily populated [`node`]
+//! # Lazily populated [`nodes`]
 //!
-//! This module contains the representation of a lazily populated [`node`].
+//! ![](https://github.com/mnmun/images/blob/main/cherry.png?raw=true)
 //!
-//! See [`crate`] for more information.
+//! Provides the foundation of the lazily populated [`nodes`]:
+//!
+//! - [`Node`] - a lazily populated [`tree`] [`node`];
+//! - [`Callback`] - a function used to create child [`nodes`] on demand;
+//! - [`Link`] - a [`non-null`] pointer to a [`node`].
+//!
+//! ---
+//!
+//! See the [`crate documentation`] for more information.
 //!
 //! [`node`]: Node
-use std::{
-    borrow::Cow, cell::UnsafeCell, fmt::Debug, ops::Range, ptr::NonNull,
-    sync::Mutex,
-};
-
-use getset::{Getters, MutGetters};
+//! [`nodes`]: Node
+//! [`tree`]: crate::Tree
+//! [`non-null`]: NonNull
+//! [`crate documentation`]: crate
+use std::{cell::UnsafeCell, fmt::Debug, ptr::NonNull, sync::Mutex};
 
 /// # [`NonNull`] pointer to a [`node`]
 ///
-/// ![link](https://github.com/mnmun/images/blob/main/chain.png?raw=true)
+/// ![](https://github.com/mnmun/images/blob/main/chain.png?raw=true)
 ///
 /// `Link` is used to connect a [`node`] with its parent and children.
 ///
-/// See [`crate`] for more information.
+/// ---
+///
+/// See the [`module documentation`] for more information.
 ///
 /// [`node`]: Node
-pub type Link<'source, Value, Source, Error> =
-    NonNull<Node<'source, Value, Source, Error>>;
+/// [`module documentation`]: crate::node
+pub type Link<Value, Error> = NonNull<Node<Value, Error>>;
 
-/// # Callback used to create a [`node's`] children
+/// # Function used to create child [`nodes`]
 ///
-/// ![populate](https://github.com/mnmun/images/blob/main/nursery.png?raw=true)
+/// ![](https://github.com/mnmun/images/blob/main/telephone.png?raw=true)
 ///
-/// Invoked when a [`cursor`] enters a [`node`] whose children have not yet been
-/// populated. This occurs when the [`node`] has no other [`cursors`] visiting
-/// it at this moment.
+/// Invoked when a [`cursor`] enters a [`node`] that is not currently being
+/// visited by any [`cursor`].
 ///
-/// The callback receives:
-///
-/// - `source`: the source data;
-/// - `range`: an optional metadata describing the relevant source range;
-/// - `parent`: a [`link`] to the parent [`node`].
+/// The `callback` accepts a shared reference to the parent's value.
 ///
 /// On success, it returns a boxed slice containing [`links`] to the created
 /// children. Otherwise, it returns an `error`.
 ///
 /// ## Example
 ///
-/// The following example shows a simple `populate` function that can be used
-/// as a callback for a [`node`]. The function creates two children and assigns
-/// their values as "left" and "right". In this illustrative example `source`
-/// and `range` are not used just to keep example simple.
+/// ![](https://github.com/mnmun/images/blob/main/bulb.png?raw=true)
 ///
-/// ```no_run
+/// The following example shows a simple `populate` function that can be used
+/// as a `callback` for a [`node`]. The function creates two children and
+/// assigns their values as "left" and "right":
+///
+/// ```rust
 /// use std::{ops::Range, borrow::Cow};
 ///
-/// use lazy_tree::node::{Link, Builder};
+/// use lazy_tree::node::{Link, Node};
 ///
-/// type MyValue = str;
-/// type MySource = (); // `source` is unused, so its element type is `()`
+/// // A type alias for a data, stored in the nodes
+/// type MyValue<'a> = &'a str;
 ///
 /// enum MyError {
 ///     PopulationFailed,
 /// };
 ///
 /// // A type alias for `Link` with the type parameters specified
-/// type MyLink<'source> = Link<'source, MyValue, MySource, MyError>;
+/// type MyLink<'a> = Link<MyValue<'a>, MyError>;
 ///
 /// // A type alias for a boxed slice of `MyLink`
-/// type Children<'source> = Box<[MyLink<'source>]>;
+/// type Children<'a> = Box<[MyLink<'a>]>;
 ///
-/// fn populate<'source>(
-///     source: impl Into<Cow<'source, [MySource]>>,
-///     range: impl Into<Option<Range<usize>>>,
-///     parent: MyLink<'source>,
-/// ) -> Result<Children<'source>, MyError> {
+/// fn populate<'a>(
+///     parent: &MyValue,
+/// ) -> Result<Children<'a>, MyError> {
 ///
 ///     // Callback can return user-defined error if population may fail
 ///     // if some_condition {
 ///     //     return Err(MyError::PopulationFailed)
 ///     // }
 ///
-///     let source = source.into();
-///
-///     let left_child = Builder::new("left", source.clone(), populate).build();
-///     let right_child = Builder::new("right", source, populate).build();
+///     let left_child = Node::new("left", populate);
+///     let right_child = Node::new("right", populate);
 ///
 ///     Ok(Box::new([left_child, right_child]))
 /// }
 /// ```
 ///
-/// See [`crate`] for more information.
+/// ---
+///
+/// See the [`module documentation`] for more information.
 ///
 /// [`node`]: Node
 /// [`node's`]: Node
+/// [`nodes`]: Node
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
 /// [`link`]: Link
 /// [`links`]: Link
-pub type Populate<'source, Value, Source, Error> =
-    fn(
-        Cow<'source, [Source]>,
-        Option<Range<usize>>,
-        Link<'source, Value, Source, Error>,
-    ) -> Result<Box<[Link<'source, Value, Source, Error>]>, Error>;
+/// [`module documentation`]: crate::node
+pub type Callback<Value, Error> =
+    fn(&Value) -> Result<Box<[Link<Value, Error>]>, Error>;
 
-/// Deallocates the subtree rooted at [`link`]
+/// # Deallocates the subtree rooted at the [`link`]
 ///
 /// [`link`]: Link
-pub(crate) fn drop_link<'source, Value, Source, Error>(
-    link: Link<'source, Value, Source, Error>,
-) where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
+pub(crate) fn drop_link<Value, Error>(link: Link<Value, Error>) {
     let mut delete_queue = vec![link];
     while let Some(mut node) = delete_queue.pop() {
         let node = unsafe { Box::from_raw(node.as_mut()) };
@@ -119,236 +114,56 @@ pub(crate) fn drop_link<'source, Value, Source, Error>(
     }
 }
 
-/// # [`Node`] builder
+/// # Lazily populated [`tree`] `node`
 ///
-/// ![builder](https://github.com/mnmun/images/blob/main/road_work.png?raw=true)
+/// ![](https://github.com/mnmun/images/blob/main/cherry.png?raw=true)
 ///
-/// Data required to build a [`node`]:
-///
-/// - `value`: the data associated with this node and exposed by
-///   [`Node::value()`];
-/// - `source`: the input collection used in the [`population callback`] for
-///   children creation;
-/// - `populate`: a [`callback`] used to create the [`node's`] children.
-///
-/// Optional [`node`] data:
-///
-/// - `parent`: a [`link`] to the parent [`node`], used for upward traversal;
-/// - `range`: metadata that passed to [`population callback`] and might be used
-///   to describe the part of `source` collection associated with this [`node`].
-///
-/// After setting all the necessary fields, call [`build()`] to get a [`link`]
-/// to the [`node`] initialized with the specified data.
-///
-/// See [`crate`] for more information.
-///
-/// [`node`]: Node
-/// [`node's`]: Node
-/// [`callback`]: Populate
-/// [`population callback`]: Populate
-/// [`link`]: Link
-/// [`build()`]: Builder::build()
-#[derive(Getters, MutGetters)]
-#[getset(get = "pub", get_mut = "pub")]
-pub struct Builder<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    parent: Option<Link<'source, Value, Source, Error>>,
-    range: Option<Range<usize>>,
-
-    value: Cow<'source, Value>,
-    source: Cow<'source, [Source]>,
-    populate: Populate<'source, Value, Source, Error>,
-}
-
-impl<'source, Value, Source, Error> Clone
-    for Builder<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    fn clone(&self) -> Self {
-        Self {
-            parent: self.parent,
-            range: self.range.clone(),
-            value: self.value.clone(),
-            source: self.source.clone(),
-            populate: self.populate,
-        }
-    }
-}
-
-impl<'source, Value, Source, Error> Builder<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    #[must_use = "method returns the modified value"]
-    pub fn with_parent(
-        mut self,
-        value: impl Into<Option<Link<'source, Value, Source, Error>>>,
-    ) -> Self {
-        self.parent = value.into();
-        self
-    }
-
-    #[must_use = "method returns the modified value"]
-    pub fn with_range(
-        mut self,
-        value: impl Into<Option<Range<usize>>>,
-    ) -> Self {
-        self.range = value.into();
-        self
-    }
-}
-
-impl<'source, Value, Source, Error> Builder<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    pub fn set_parent(
-        &mut self,
-        value: impl Into<Option<Link<'source, Value, Source, Error>>>,
-    ) -> &mut Self {
-        self.parent = value.into();
-        self
-    }
-
-    pub fn set_range(
-        &mut self,
-        value: impl Into<Option<Range<usize>>>,
-    ) -> &mut Self {
-        self.range = value.into();
-        self
-    }
-}
-
-impl<'source, Value, Source, Error> Builder<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    /// # Creates a new [`builder`]
-    ///
-    /// Fields `parent` and `range` are set to `None` by default.
-    ///
-    /// [`builder`]: Builder
-    pub fn new(
-        value: impl Into<Cow<'source, Value>>,
-        source: impl Into<Cow<'source, [Source]>>,
-        populate: Populate<'source, Value, Source, Error>,
-    ) -> Self {
-        let value = value.into();
-        let source = source.into();
-
-        Self {
-            parent: None,
-            range: None,
-
-            value,
-            source,
-            populate,
-        }
-    }
-
-    /// Allocates a [`node`] consuming this [`builder`] and returns a [`link`]
-    /// to it
-    ///
-    /// [`node`]: Node
-    /// [`builder`]: Builder
-    /// [`link`]: Link
-    pub fn build(self) -> Link<'source, Value, Source, Error> {
-        #[cfg(feature = "debug")]
-        {
-            use crate::tree::NODES_ALIVE;
-            use std::sync::atomic::Ordering;
-            NODES_ALIVE.fetch_add(1, Ordering::Relaxed);
-        }
-
-        let node = Node {
-            parent: self.parent,
-            children: UnsafeCell::default(),
-            visitors: Mutex::new(0),
-
-            value: self.value,
-
-            source: self.source,
-            range: self.range,
-            populate: self.populate,
-        };
-
-        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(node))) }
-    }
-}
-
-/// # `Node`
-///
-/// ![node](https://github.com/mnmun/images/blob/main/cherry.png?raw=true)
-///
-/// A `node` stores a [`value`] together with the `source` data and `range`
-/// metadata needed to create its children. `Nodes` are connected through
-/// [`links`] - [`non-null`] pointers to heap-allocated `nodes`. [`Links`] are
-/// used both for the optional parent pointer and for pointers to currently
-/// populated children.
+/// A `node` stores a used-defined [`value`] as well as a [`callback`] to lazily
+/// create its child `nodes`. `Nodes` are connected through [`links`] -
+/// [`non-null`] pointers to heap-allocated `nodes`. [`Links`] are used both
+/// for the optional parent and for currently populated children.
 ///
 /// ## Creation
 ///
-/// `Node` instance can be obtained using [`builder`] only in the form of a
-/// [`link`].
+/// `Node` can be obtained using the [`Node::new()`] method only in the form of
+/// a [`link`].
 ///
 /// ## Children
 ///
 /// `Node` has an internal counter that tracks how many [`cursors`] are
-/// visiting it. When a [`cursor`] descends to a `node` (visits), its counter
-/// is incremented; when a [`cursor`] ascends from the `node` (leaves) -
-/// decremented. When a [`cursor`] visits a `node` whose current counter is
-/// zero, the `node's` [`population callback`] is invoked. The resulting
-/// children remain available until the last [`cursor`] leaves the `node`, at
-/// which point the counter reaches zero and children are released.
+/// currently visiting it. When a [`cursor`] descends to (visits) a `node`,
+/// its counter is incremented; when a [`cursor`] ascends from (leaves) the
+/// `node` - decremented.
 ///
-/// See [`crate`] for more information.
+/// When a [`cursor`] visits a `node` whose current counter is zero, the
+/// `node's` [`callback`] is invoked. The resulting children remain available
+/// until the last [`cursor`] leaves the `node`, at which point the counter
+/// reaches zero and children are released.
 ///
+/// ---
+///
+/// See the [`module documentation`] for more information.
+///
+/// [`tree`]: crate::Tree
 /// [`non-null`]: NonNull
 /// [`value`]: Node::value()
 /// [`link`]: Link
 /// [`links`]: Link
 /// [`Links`]: Link
-/// [`builder`]: Builder
 /// [`cursors`]: crate::Cursor
 /// [`cursor`]: crate::Cursor
-/// [`population callback`]: Populate
-pub struct Node<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    pub(crate) parent: Option<Link<'source, Value, Source, Error>>,
-    pub(crate) children: UnsafeCell<Box<[Link<'source, Value, Source, Error>]>>,
+/// [`callback`]: Callback
+/// [`module documentation`]: crate::node
+pub struct Node<Value, Error> {
+    pub(crate) parent: Option<Link<Value, Error>>,
+    pub(crate) children: UnsafeCell<Box<[Link<Value, Error>]>>,
     pub(crate) visitors: Mutex<usize>,
 
-    value: Cow<'source, Value>,
-
-    source: Cow<'source, [Source]>,
-    range: Option<Range<usize>>,
-    populate: Populate<'source, Value, Source, Error>,
+    value: Value,
+    callback: Callback<Value, Error>,
 }
 
-impl<'source, Value, Source, Error> Debug
-    for Node<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
+impl<Value, Error> Debug for Node<Value, Error> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Node")
             .field("parent", &self.parent)
@@ -358,13 +173,56 @@ where
     }
 }
 
-impl<'source, Value, Source, Error> Node<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
-    /// Releases all children of the [`node`]
+impl<Value, Error> Node<Value, Error> {
+    /// # Allocates a [`node`] and returns a [`link`] to it
+    ///
+    /// [`node`]: Node
+    /// [`link`]: Link
+    pub fn new(
+        value: impl Into<Value>,
+        callback: Callback<Value, Error>,
+    ) -> Link<Value, Error> {
+        let value = value.into();
+
+        let node = Node {
+            parent: None,
+            children: UnsafeCell::default(),
+            visitors: Mutex::new(0),
+
+            value,
+            callback,
+        };
+
+        #[cfg(feature = "debug")]
+        {
+            use crate::tree::NODES_ALIVE;
+            use std::sync::atomic::Ordering;
+            NODES_ALIVE.fetch_add(1, Ordering::Relaxed);
+        }
+
+        unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(node))) }
+    }
+
+    /// # Returns a reference to the [`node's`] `value`
+    ///
+    /// [`node's`]: Node
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+
+    /// # Returns the shared references to the currently populated child [`nodes`]
+    ///
+    /// [`nodes`]: Node
+    pub fn children(&self) -> Box<[&Node<Value, Error>]> {
+        unsafe {
+            (*self.children.get())
+                .iter()
+                .map(|child| child.as_ref())
+                .collect()
+        }
+    }
+
+    /// # Releases all children of the [`node`]
     ///
     /// [`node`]: Node
     fn kill_children(&self) {
@@ -373,21 +231,22 @@ where
         }
     }
 
-    /// # Populates the [`node's`] children using its [`callback`]
+    /// # Populates the [`node's`] child [`nodes`] using [`callback`]
     ///
     /// Any previously populated children are released.
     ///
     /// [`node's`]: Node
-    /// [`callback`]: Populate
+    /// [`nodes`]: Node
+    /// [`callback`]: Callback
     fn make_children(
         &self,
-        link_to_itself: Link<'source, Value, Source, Error>,
+        link_to_itself: Link<Value, Error>,
     ) -> Result<(), Error> {
-        let children = (self.populate)(
-            self.source.clone(),
-            self.range.clone(),
-            link_to_itself,
-        )?;
+        let mut children = (self.callback)(&self.value)?;
+
+        children.iter_mut().for_each(|child| unsafe {
+            child.as_mut().parent = Some(link_to_itself)
+        });
 
         for child in unsafe { self.children.get().replace(children) } {
             drop_link(child);
@@ -396,10 +255,8 @@ where
         Ok(())
     }
 
-    /// Convenient wrapper for an `unsafe` call
-    pub(crate) fn from_link(
-        link: Link<'source, Value, Source, Error>,
-    ) -> &'source Self {
+    /// # Convenient wrapper for an `unsafe { link.as_ref() }` call
+    pub(crate) fn from_link<'a>(link: Link<Value, Error>) -> &'a Self {
         unsafe { link.as_ref() }
     }
 
@@ -413,13 +270,13 @@ where
     /// methods is treated as a sequence of upward and downward movements.
     ///
     /// This method increments the `visitors` counter and invokes the [`node's`]
-    /// [`population callback`] if previous value of `visitors` was zero.
+    /// [`callback`] if previous value of `visitors` was zero.
     ///
     /// # Errors
     ///
-    /// If the [`population callback`] returns an `error`, the `visitors`
-    /// counter is not incremented, and the children are populated on the next
-    /// successful attempt to visit this [`node`].
+    /// If the [`callback`] returns an `error`, the `visitors` counter is not
+    /// incremented, and the children are populated on the next successful
+    /// attempt to visit this [`node`].
     ///
     /// [`cursor`]: crate::Cursor
     /// [`walk()`]: crate::Cursor::walk()
@@ -427,10 +284,10 @@ where
     /// [`Direction::Down`]: crate::Direction::Down
     /// [`node`]: Node
     /// [`node's`]: Node
-    /// [`population callback`]: Populate
+    /// [`callback`]: Callback
     pub(crate) fn visit(
         &self,
-        link_to_itself: Link<'source, Value, Source, Error>,
+        link_to_itself: Link<Value, Error>,
     ) -> Result<(), Error> {
         let mut visitors = match self.visitors.lock() {
             Ok(guard) => guard,
@@ -478,31 +335,9 @@ where
             .checked_sub(1)
             .expect("Visitors count could not be zero at this point");
     }
-
-    /// Returns a reference to the [`node's`] `value`
-    ///
-    /// [`node's`]: Node
-    pub fn value(&self) -> &Cow<'source, Value> {
-        &self.value
-    }
-
-    /// Returns the `values` of all currently populated children
-    pub fn children(&self) -> Box<[Cow<'source, Value>]> {
-        unsafe {
-            (*self.children.get())
-                .iter()
-                .map(|child| child.as_ref().value.clone())
-                .collect()
-        }
-    }
 }
 
-impl<'source, Value, Source, Error> Drop for Node<'source, Value, Source, Error>
-where
-    Value: ToOwned + ?Sized + 'source,
-    Source: Clone + 'source,
-    [Source]: ToOwned<Owned = Vec<Source>>,
-{
+impl<Value, Error> Drop for Node<Value, Error> {
     fn drop(&mut self) {
         #[cfg(feature = "debug")]
         {

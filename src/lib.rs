@@ -1,31 +1,29 @@
-//! ![logo](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
+//! ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 //!
 //! # A [`tree`] of lazily populated [`nodes`] with [`cursor-based`] traversal
 //!
-//! This crate provides a [`cursor-based`] interface for traversing [`trees`]
-//! without materializing the entire hierarchy in memory. The [`nodes`] are
-//! populated lazily when visited by [`cursors`] and remain available only while
-//! they are needed by active [`cursors`].
-//!
-//! ## Overview
+//! Provides a [`cursor-based`] interface for traversing [`trees`] of lazily
+//! populated [`nodes`] without materializing the entire hierarchy in memory.
+//! The [`nodes`] are populated only when visited by [`cursors`] and remain
+//! available only while they are needed.
 //!
 //! Each [`node`] has an internal counter that tracks how many [`cursors`] are
-//! visiting it. When a [`cursor`] descends to a [`node`] (visits), its counter
-//! is incremented; when a [`cursor`] ascends from the [`node`] (leaves) -
+//! visiting it. When a [`cursor`] descends to (visits) a [`node`], its counter
+//! is incremented; when a [`cursor`] ascends from (leaves) the [`node`] -
 //! decremented. When a [`cursor`] visits a [`node`] whose current counter is
-//! zero, the [`node's`] [`population callback`] is invoked. The resulting
-//! children remain available until the last [`cursor`] leaves the [`node`], at
-//! which point the counter reaches zero and children are released.
+//! zero, the [`node's`] [`callback`] is invoked. The resulting children remain
+//! available until the last [`cursor`] leaves the [`node`], at which point the
+//! counter reaches zero and children are released.
 //!
 //! A [`cursor`] can move in both axes through the [`tree`]:
 //!
-//! - Vertically, from a parent to one of its children and back;
+//! - Vertically, from a parent to one of its children or in the opposite
+//!   direction;
 //! - Horizontally, to the next or previous sibling, including siblings in an
 //!   adjacent branch.
 //!
 //! The following diagram shows the example [`tree`] in various states
-//! determined by the different positions of the [`cursor`], indicated by
-//! asterisks:
+//! determined by the positions of the [`cursor`], indicated by asterisks:
 //!
 //! ```plain
 //!                                               ROOT
@@ -67,33 +65,34 @@
 //! - `(0)`: The [`cursor`] is dropped, and all [`nodes`] except `ROOT` in the
 //!   [`tree`] are released.
 //!
-//! In other words, [`nodes`] populated during traversal are released
+//! In other words, [`nodes`] [`populated`] during traversal and released
 //! automatically once no [`cursor`] keeps them visited.
 //!
 //! ## Types
 //!
+//! ![](https://github.com/mnmun/images/blob/main/handle_with_care.png?raw=true)
+//!
 //! The crate provides the following main types:
 //!
-//! - [`Tree`] - owns the `root` [`node`] and creates [`cursors`] for traversal;
+//! - [`Tree`] - owns the `root` [`node`] and creates [`cursors`];
 //! - [`Cursor`] - traverses and inspects the [`tree`];
-//! - [`Node`] - stores a [`value`], a [`link`] to its parent and links to its
+//! - [`Node`] - stores [`value`], [`link`] to parent and [`links`] to
 //!   currently populated children;
 //! - [`Populate`] - a function used to create a [`node's`] children when a
-//!   [`cursor`] visits a [`node`] that is not currently visited by another
-//!   [`cursor`].
+//!   [`cursor`] visits an unvisited [`node`].
 //!
 //! ## Generic parameters
 //!
-//! Many types in this crate use the following generic parameters:
+//! ![](https://github.com/mnmun/images/blob/main/umbrella.png?raw=true)
 //!
-//! - `Value` - the type of the [`value`] stored in each [`node`] through
-//!   `Cow<'source, Value>`;
-//! - `Source` - the element type of the `source` collection (`Vec<Source>`
-//!   or `&[Source]`) used to populate [`nodes`]. The `source` collection is
-//!   stored in each [`node`] through `Cow<'source, [Source]>`;
-//! - `Error` - the `error` type returned by the [`population callback`].
+//! The following generic parameters are used in the types of this crate:
+//!
+//! - `Value` - the type of the [`value`] stored in each [`node`];
+//! - `Error` - the type returned by the [`callback`] in the event of failure.
 //!
 //! ## Safety
+//!
+//! ![](https://github.com/mnmun/images/blob/main/slippery.png?raw=true)
 //!
 //! A [`tree`] can be shared between threads, and multiple [`cursors`] may
 //! traverse the same [`tree`] concurrently. Access to the `root` and to each
@@ -102,6 +101,8 @@
 //! the [`tree`] from which it was created.
 //!
 //! ## Example
+//!
+//! ![](https://github.com/mnmun/images/blob/main/bulb.png?raw=true)
 //!
 //! The following example constructs a lazily populated binary [`tree`] from
 //! serialized data represented as
@@ -116,14 +117,22 @@
 //!       ...         ...         ...         ...
 //! ```
 //!
-//! This example uses `&str` as the [`node`] [`value`] type and `Option<&str>` as
-//! the element type of the `source` collection. An absent value is represented
-//! by `None`, which allows the `source` collection to describe missing nodes.
+//! Let the source data be represented by a slice of elements of type
+//! `Option<&str>`, where missing [`nodes`] are denoted by `None`.
 //!
-//! The [`population callback`] creates a [`node's`] children from two
-//! consecutive elements of the `source` collection, starting at the index
-//! specified by the [`node's`] `range`. A [`node`] without a `range` is treated
-//! as a leaf.
+//! The [`value`] stored in each [`node`] consists of the following fields:
+//!
+//! - `content` - a `&str` value associated with the [`node`];
+//! - `source` - a reference to the source data;
+//! - `position` - an index within the source data used to determine the
+//!   creation of child [`nodes`].
+//!
+//! The `content` field is publicly accessible via the `content()` method, while
+//! the `source` and `position` fields are internal states utilized only within
+//! the `populate` [`callback`].
+//!
+//! The `populate` [`callback`] creates two or fewer child [`nodes`] based on
+//! the `source` and the `position` of the parent [`node`].
 //!
 //! ```rust
 //! use std::{borrow::Cow, ops::Range};
@@ -131,92 +140,74 @@
 //!
 //! use lazy_tree::{
 //!   Tree,
-//!   node::{Builder, Link},
+//!   Node,
+//!   node::Link,
 //!   cursor::{Direction, Target}
 //! };
 //!
-//! // The type of the value stored in each node
-//! type MyValue = str;
+//! // `Value` stored in each node
+//! struct Bundle<'source> {
+//!     // Publicly accessible via the `content()` method
+//!     content: &'source str,
 //!
-//! // The type of an element in the source collection
-//! type MySource<'source> = Option<&'source str>;
+//!     // Internal state
+//!     source: &'source[Option<&'source str>],
+//!     position: usize,
+//! }
 //!
-//! // The error returned by the population callback
+//! impl<'source> Bundle<'source> {
+//!     pub fn content(&self) -> &'source str {
+//!         &self.content
+//!     }
+//! }
+//!
+//! // The error returned by the callback
 //! #[derive(Debug)]
 //! enum MyError {
-//!     // Indicates that the source collection is empty
+//!     // Indicates that the source is empty
 //!     SourceIsEmpty,
 //! };
 //!
 //! // A type alias for `Link` with the type parameters specified
-//! type MyLink<'source> = Link<'source, MyValue, MySource<'source>, MyError>;
+//! type MyLink<'source> = Link<Bundle<'source>, MyError>;
 //!
 //! // A type alias for a boxed slice of `MyLink`
 //! type Children<'source> = Box<[MyLink<'source>]>;
 //!
 //! fn populate<'source>(
-//!     source: impl Into<Cow<'source, [MySource<'source>]>>,
-//!     range: Option<Range<usize>>,
-//!     parent: MyLink<'source>,
+//!     parent: &Bundle<'source>,
 //! ) -> Result<Children<'source>, MyError> {
-//!     let range = if let Some(range) = range {
-//!         range
-//!     } else {
-//!         // A node without a range is a leaf
-//!         return Ok(Box::default());
-//!     };
-//!
-//!     let source = source.into();
-//!
-//!     if source.is_empty() {
+//!     if parent.source.is_empty() {
 //!         return Err(MyError::SourceIsEmpty);
 //!     }
 //!
-//!     // The range identifies the positions of the node's children in the
-//!     // source collection
-//!     let left_child = source.get(range.start).cloned();
-//!     let right_child = source.get(range.start + 1).cloned();
+//!     if parent.position >= parent.source.len() {
+//!         return Ok(Box::default());
+//!     }
+//!
+//!     let left_child = parent.source.get(parent.position).cloned();
+//!     let right_child = parent.source.get(parent.position + 1).cloned();
 //!
 //!     let mut children = vec![];
 //!
 //!     if let Some(Some(value)) = left_child {
-//!         children.push(
-//!             Builder::new(
-//!                 Cow::Borrowed(value),
-//!                 source.clone(),
-//!                 populate, // Reuses the same callback for child nodes
-//!             )
-//!             .with_parent(parent) // Required for upward traversal
-//!             .with_range({
-//!                 let start = range.start * 2 + 2;
-//!                 if source.len() < start {
-//!                     None
-//!                 } else {
-//!                     Some(start..source.len())
-//!                 }
-//!             })
-//!             .build()
-//!         );
+//!         let bundle = Bundle {
+//!             content: value,
+//!             source: parent.source,
+//!             position: parent.position * 2 + 2,
+//!         };
+//!
+//!         children.push(Node::new(bundle, populate));
 //!     }
 //!
 //!     if let Some(Some(value)) = right_child {
-//!         children.push(
-//!             Builder::new(
-//!                 Cow::Borrowed(value),
-//!                 source.clone(),
-//!                 populate, // Reuses the same callback for child nodes
-//!             )
-//!             .with_parent(parent) // Required for upward traversal
-//!             .with_range({
-//!                 let start = (range.start + 1) * 2 + 2;
-//!                 if source.len() < start {
-//!                     None
-//!                 } else {
-//!                     Some(start..source.len())
-//!                 }
-//!             })
-//!             .build()
-//!         );
+//!         let bundle = Bundle {
+//!             content: value,
+//!             source: parent.source,
+//!             position: (parent.position + 1) * 2 + 2,
+//!         };
+//!
+//!         children.push(Node::new(bundle, populate));
 //!     }
 //!
 //!     Ok(children.into_boxed_slice())
@@ -232,6 +223,7 @@
 //! // LEFT-LEFT-LEFT                     
 //! //                                    
 //! let source: &[Option<&str>] = &[
+//!     Some("ROOT"),
 //!     Some("LEFT"),
 //!     Some("RIGHT"),
 //!     Some("LEFT-LEFT"),
@@ -243,32 +235,45 @@
 //! ];
 //!
 //! let tree = Tree::new(
-//!     Builder::new("ROOT", source.clone(), populate)
-//!         .with_range(0..source.len())
-//!         .build()
+//!     Node::new(
+//!         Bundle {
+//!             content: source[0].unwrap(),
+//!             source: &source[1..],
+//!             position: 0
+//!         },
+//!         populate
+//!     )
 //! );
 //!
 //! let mut cursor = tree.cursor().unwrap();
 //! assert_eq!(cursor.path(), &[0]);
-//! assert_eq!(cursor.value(), "ROOT");
+//! assert_eq!(cursor.value().content(), "ROOT");
 //!
 //! cursor.walk(Direction::Down(Target::First));
 //! assert_eq!(cursor.path(), &[0, 0]);
-//! assert_eq!(cursor.value(), "LEFT");
+//! assert_eq!(cursor.value().content(), "LEFT");
 //!
 //! cursor.walk(Direction::Right);
 //! assert_eq!(cursor.path(), &[0, 1]);
-//! assert_eq!(cursor.value(), "RIGHT");
+//! assert_eq!(cursor.value().content(), "RIGHT");
 //!
 //! cursor.walk(Direction::Down(Target::First));
 //! assert_eq!(cursor.path(), &[0, 1, 0]);
-//! assert_eq!(cursor.value(), "RIGHT-RIGHT");
+//! assert_eq!(cursor.value().content(), "RIGHT-RIGHT");
 //! ```
 //!
-//! [Here] you could find a more complex example of a JSON parser build on top
-//! of this crate.
+//! The [`lazy_json`] crate includes a JSON parser built using this crate, which
+//! can serve as an usage example.
 //!
 //! ## Features
+//!
+//! ![](https://github.com/mnmun/images/blob/main/pot.png?raw=true)
+//!
+#![doc = document_features::document_features!()]
+//!
+//! ## License
+//!
+//! [MIT](https://github.com/mnmun/lazy_tree/blob/main/LICENSE)
 //!
 //! [`tree`]: Tree
 //! [`tree's`]: Tree
@@ -277,20 +282,15 @@
 //! [`nodes`]: Node
 //! [`node's`]: Node
 //! [`link`]: crate::node::Link
+//! [`links`]: crate::node::Link
 //! [`cursor`]: Cursor
 //! [`cursor-based`]: Cursor
 //! [`cursors`]: Cursor
-//! [`callback`]: crate::node::Populate
-//! [`population callback`]: crate::node::Populate
-//! [`Populate`]: crate::node::Populate
+//! [`callback`]: crate::node::Callback
+//! [`populated`]: crate::node::Callback
+//! [`Populate`]: crate::node::Callback
 //! [`value`]: Node::value()
-//! [Here]: https://github.com/mnmun/json
-//!
-#![doc = document_features::document_features!()]
-//!
-//! ## License
-//!
-//! [MIT](https://github.com/mnmun/lazy_tree/blob/main/LICENSE)
+//! [`lazy_json`]: https://github.com/mnmun/lazy_json
 
 #![allow(dead_code)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -321,11 +321,41 @@ mod tests {
     use crate::{
         Cursor, Node, Tree,
         cursor::{Direction, Target},
-        node::{Builder, Link},
+        node::Link,
     };
 
-    type MyValue = str;
-    type MySource<'source> = Option<&'source str>;
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Bundle<'source> {
+        content: &'source str,
+        range: Option<Range<usize>>,
+        source: &'source [Option<&'source str>],
+    }
+
+    impl<'source> Bundle<'source> {
+        fn new(
+            content: &'source str,
+            range: impl Into<Option<Range<usize>>>,
+            source: &'source [Option<&'source str>],
+        ) -> Self {
+            let range = range.into();
+            Self {
+                content,
+                range,
+                source,
+            }
+        }
+
+        fn owned(
+            content: &'source str,
+            range: impl Into<Option<Range<usize>>>,
+            source: &'source [Option<&'source str>],
+        ) -> Cow<'source, Self> {
+            Cow::Owned(Self::new(content, range, source))
+        }
+    }
+
+    // type MyValue = str;
+    // type MySource<'source> = Option<&'source str>;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum MyError {
@@ -333,78 +363,73 @@ mod tests {
         RootIsNone,
     }
 
-    type MyLink<'source> = Link<'source, MyValue, MySource<'source>, MyError>;
+    type MyLink<'source> = Link<Bundle<'source>, MyError>;
     type Children<'source> = Box<[MyLink<'source>]>;
 
     fn binary_tree<'source>(
-        source: &'source [MySource<'source>],
-    ) -> Tree<'source, MyValue, MySource<'source>, MyError> {
+        source: &'source [Option<&'source str>],
+    ) -> Tree<Bundle<'source>, MyError> {
         fn populate<'source>(
-            source: impl Into<Cow<'source, [MySource<'source>]>>,
-            range: Option<Range<usize>>,
-            parent: Link<'source, MyValue, MySource<'source>, MyError>,
+            // source: impl Into<Cow<'source, [MySource<'source>]>>,
+            parent: &Bundle<'source>,
         ) -> Result<Children<'source>, MyError> {
-            let range = if let Some(range) = range {
+            let range = if let Some(range) = &parent.range {
                 range
             } else {
                 return Ok(Box::default());
             };
 
-            let source = source.into();
+            // let source = source.into();
+            let source = parent.source;
 
             let left_child = source.get(range.start).cloned();
             let right_child = source.get(range.start + 1).cloned();
 
             let mut children = vec![];
 
-            if let Some(Some(value)) = left_child {
-                children.push(
-                    Builder::new(
-                        Cow::Borrowed(value),
-                        source.clone(),
-                        populate,
-                    )
-                    .with_parent(parent)
-                    .with_range({
-                        let start = range.start * 2 + 2;
-                        if source.len() < start {
-                            None
-                        } else {
-                            Some(start..source.len())
-                        }
-                    })
-                    .build(),
-                );
+            if let Some(Some(content)) = left_child {
+                children.push(Node::new(
+                    Bundle::new(
+                        content,
+                        {
+                            let start = range.start * 2 + 2;
+                            if source.len() < start {
+                                None
+                            } else {
+                                Some(start..source.len())
+                            }
+                        },
+                        source,
+                    ),
+                    populate,
+                ));
             }
 
             if let Some(Some(value)) = right_child {
-                children.push(
-                    Builder::new(
-                        Cow::Borrowed(value),
-                        source.clone(),
-                        populate,
-                    )
-                    .with_parent(parent)
-                    .with_range({
-                        let start = (range.start + 1) * 2 + 2;
-                        if source.len() < start {
-                            None
-                        } else {
-                            Some(start..source.len())
-                        }
-                    })
-                    .build(),
-                );
+                children.push(Node::new(
+                    Bundle::new(
+                        value,
+                        {
+                            let start = (range.start + 1) * 2 + 2;
+                            if source.len() < start {
+                                None
+                            } else {
+                                Some(start..source.len())
+                            }
+                        },
+                        source,
+                    ),
+                    populate,
+                ));
             }
 
             Ok(children.into_boxed_slice())
         }
 
-        Tree::new(
-            Builder::new("ROOT", source, populate)
-                .with_range(0..source.len())
-                .build(),
-        )
+        Tree::new(Node::new(
+            Bundle::new("ROOT", 0..source.len(), source),
+            populate,
+        ))
     }
 
     /// ```plain
@@ -434,75 +459,138 @@ mod tests {
     ];
 
     fn binary_0_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L", "R"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L", "R"]
+        );
     }
 
     fn binary_0_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "L");
-        assert_eq!(*cursor.children(), ["LL", "LR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "L");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LL", "LR"]
+        );
     }
 
     fn binary_0_assert_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "R");
-        assert_eq!(*cursor.children(), ["RL", "RR",]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "R");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["RL", "RR",]
+        );
     }
 
     fn binary_0_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_0_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LR");
-        assert_eq!(*cursor.children(), ["LRL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LRL"]
+        );
     }
 
     fn binary_0_assert_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RL");
-        assert_eq!(*cursor.children(), ["RLL" /*, "RLR" */]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "RL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["RLL" /*, "RLR" */]
+        );
     }
 
     fn binary_0_assert_0_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RR");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "RR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_0_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_0_assert_0_1_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "RLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -532,35 +620,63 @@ mod tests {
     ];
 
     fn binary_1_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L"]
+        );
     }
 
     fn binary_1_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_1_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LR");
-        assert_eq!(*cursor.children(), ["LRL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LRL"]
+        );
     }
 
     fn binary_1_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -590,43 +706,78 @@ mod tests {
     ];
 
     fn binary_2_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L"]
+        );
     }
 
     fn binary_2_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "L");
-        assert_eq!(*cursor.children(), ["LL", "LR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "L");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LL", "LR"]
+        );
     }
 
     fn binary_2_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), ["LLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLL"]
+        );
     }
 
     fn binary_2_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LR");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_2_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -660,59 +811,108 @@ mod tests {
     ];
 
     fn binary_3_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L"]
+        );
     }
 
     fn binary_3_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "L");
-        assert_eq!(*cursor.children(), ["LL", "LR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "L");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LL", "LR"]
+        );
     }
 
     fn binary_3_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), ["LLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLL"]
+        );
     }
 
     fn binary_3_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LR");
-        assert_eq!(*cursor.children(), ["LRL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LRL"]
+        );
     }
 
     fn binary_3_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLL");
-        assert_eq!(*cursor.children(), ["LLLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLLL"]
+        );
     }
 
     fn binary_3_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_3_assert_0_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -750,59 +950,108 @@ mod tests {
     ];
 
     fn binary_4_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L"]
+        );
     }
 
     fn binary_4_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "L");
-        assert_eq!(*cursor.children(), ["LL", "LR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "L");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LL", "LR"]
+        );
     }
 
     fn binary_4_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), ["LLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLL"]
+        );
     }
 
     fn binary_4_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LR");
-        assert_eq!(*cursor.children(), ["LRL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LRL"]
+        );
     }
 
     fn binary_4_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_4_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRL");
-        assert_eq!(*cursor.children(), ["LRLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LRLL"]
+        );
     }
 
     fn binary_4_assert_0_0_1_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -836,43 +1085,78 @@ mod tests {
     ];
 
     fn list_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L"]
+        );
     }
 
     fn list_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "L");
-        assert_eq!(*cursor.children(), ["LL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "L");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LL"]
+        );
     }
 
     fn list_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), ["LLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLL"]
+        );
     }
 
     fn list_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLL");
-        assert_eq!(*cursor.children(), ["LLLL"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLLL"]
+        );
     }
 
     fn list_assert_0_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -881,11 +1165,18 @@ mod tests {
     const EMPTY: &[Option<&str>] = &[None, None];
 
     fn empty_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     /// ```plain
@@ -915,123 +1206,228 @@ mod tests {
     ];
 
     fn binary_full_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "ROOT");
-        assert_eq!(*cursor.children(), ["L", "R"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["L", "R"]
+        );
     }
 
     fn binary_full_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "L");
-        assert_eq!(*cursor.children(), ["LL", "LR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "L");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LL", "LR"]
+        );
     }
 
     fn binary_full_assert_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "R");
-        assert_eq!(*cursor.children(), ["RL", "RR",]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "R");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["RL", "RR",]
+        );
     }
 
     fn binary_full_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LL");
-        assert_eq!(*cursor.children(), ["LLL", "LLR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LLL", "LLR"]
+        );
     }
 
     fn binary_full_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LR");
-        assert_eq!(*cursor.children(), ["LRL", "LRR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["LRL", "LRR"]
+        );
     }
 
     fn binary_full_assert_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RL");
-        assert_eq!(*cursor.children(), ["RLL", "RLR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "RL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["RLL", "RLR"]
+        );
     }
 
     fn binary_full_assert_0_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RR");
-        assert_eq!(*cursor.children(), ["RRL", "RRR"]);
+        assert_eq!(Node::from_link(cursor.link).value().content, "RR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            ["RRL", "RRR"]
+        );
     }
 
     fn binary_full_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LLR");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LLR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_0_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 0, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "LRR");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "LRR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_1_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RLL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "RLL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_1_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RLR");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "RLR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_1_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RRL");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "RRL");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     fn binary_full_assert_0_1_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, 'source, str, Option<&str>, MyError>,
+        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
     ) {
         assert_eq!(cursor.path(), &[0, 1, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value(), "RRR");
-        assert_eq!(*cursor.children(), Vec::<&str>::default());
+        assert_eq!(Node::from_link(cursor.link).value().content, "RRR");
+        assert_eq!(
+            *cursor
+                .children()
+                .iter()
+                .map(|child| child.value().content)
+                .collect::<Vec<_>>(),
+            Vec::<&str>::default()
+        );
     }
 
     #[test]

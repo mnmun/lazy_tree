@@ -12,7 +12,7 @@ edition = "2024"
 
 [features]
 default = []
-#! This crate provides a set of optional features that can be enabled in your
+#! This crate provides a set of optional features that can be enabled in
 #! `Cargo.toml` file:
 
 ## Enables memory leak detection.

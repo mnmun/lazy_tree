@@ -7,12 +7,11 @@
 //!
 //! ---
 //!
-//! See the [`crate documentation`] for more information.
+//! See the [`crate`] documentation for more information.
 //!
 //! [`tree`]: crate::Tree
-//! [`cursor`]: Cursor
-//! [`nodes`]: Node
-//! [`crate documentation`]: crate
+//! [`cursor`]: crate::Cursor
+//! [`nodes`]: crate::Node
 
 use std::{marker::PhantomData, ops::Deref};
 
@@ -24,11 +23,11 @@ use crate::node::{Link, Node};
 ///
 /// ![](https://github.com/mnmun/images/blob/main/target.png?raw=true)
 ///
-/// See [`direction`] for more information.
+/// See the [`direction`] documentation for more information.
 ///
-/// [`node`]: Node
-/// [`cursor`]: Cursor
-/// [`direction`]: Direction
+/// [`node`]: crate::Node
+/// [`cursor`]: crate::Cursor
+/// [`direction`]: crate::cursor::Direction
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Target {
     /// Selects the child at the specified zero-based index
@@ -42,36 +41,37 @@ pub enum Target {
 ///
 /// ![](https://github.com/mnmun/images/blob/main/no_crossing.png?raw=true)
 ///
-/// See the [`walk()`] and [`jump()`] methods for more information.
+/// See the [`walk()`] and [`jump()`] methods documentation for more
+/// information.
 ///
-/// [`cursor`]: Cursor
-/// [`walk()`]: Cursor::walk()
-/// [`jump()`]: Cursor::jump()
+/// [`cursor`]: crate::Cursor
+/// [`walk()`]: crate::Cursor::walk()
+/// [`jump()`]: crate::Cursor::jump()
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Direction {
     /// Moves the [`cursor`] to the parent [`node`]
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     Up,
 
     /// Moves the [`cursor`] to a child [`node`] selected by [`target`]
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
-    /// [`target`]: Target
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
+    /// [`target`]: crate::cursor::Target
     Down(Target),
 
     /// Moves the [`cursor`] to the previous sibling [`node`]
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     Left,
 
     /// Moves the [`cursor`] to the next sibling [`node`]
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     Right,
 }
 
@@ -137,32 +137,32 @@ pub enum Direction {
 ///
 /// ---
 ///
-/// See the [`module documentation`] for more information.
+/// See the [`module`] documentation for more information.
 ///
-/// [`link`]: Link
-/// [`node`]: Node
-/// [`node's`]: Node
-/// [`nodes`]: Node
-/// [`&Node`]: Node
-/// [`value()`]: Node::value()
-/// [`children()`]: Node::children()
-/// [`path`]: Cursor::path()
-/// [`paths`]: Cursor::path()
-/// [`Path`]: Cursor::path()
+/// [`link`]: crate::node::Link
+/// [`node`]: crate::Node
+/// [`node's`]: crate::Node
+/// [`nodes`]: crate::Node
+/// [`&Node`]: crate::Node
+/// [`value()`]: crate::Node::value()
+/// [`children()`]: crate::Node::children()
+/// [`path`]: crate::Cursor::path()
+/// [`paths`]: crate::Cursor::path()
+/// [`Path`]: crate::Cursor::path()
 /// [`tree`]: crate::Tree
 /// [`tree's`]: crate::Tree
 /// [`Tree`]: crate::Tree
 /// [`Tree::cursor()`]: crate::Tree::cursor()
-/// [`go_to()`]: Cursor::go_to()
-/// [`walk()`]: Cursor::walk()
-/// [`jump()`]: Cursor::jump()
-/// [`direction`]: Direction
-/// [`module documentation`]: crate::cursor
+/// [`go_to()`]: crate::Cursor::go_to()
+/// [`walk()`]: crate::Cursor::walk()
+/// [`jump()`]: crate::Cursor::jump()
+/// [`direction`]: crate::cursor::Direction
+/// [`module`]: crate::cursor
 #[derive(Debug, Getters)]
 pub struct Cursor<'tree, Value, Error> {
     /// # [`Link`] to the [`node`] being currently observed
     ///
-    /// [`node`]: Node
+    /// [`node`]: crate::Node
     pub(crate) link: Link<Value, Error>,
 
     /// # Absolute `path` from the [`tree's`] `root` to the [`node`] being currently observed
@@ -174,7 +174,7 @@ pub struct Cursor<'tree, Value, Error> {
     ///
     /// [`tree`]: crate::Tree
     /// [`tree's`]: crate::Tree
-    /// [`node`]: Node
+    /// [`node`]: crate::Node
     #[getset(get = "pub")]
     path: Vec<usize>,
 
@@ -195,9 +195,9 @@ pub struct Cursor<'tree, Value, Error> {
 /// constrained by the lifetime of its [`tree`].
 ///
 /// [`non-null`]: std::ptr::NonNull
-/// [`link`]: Link
-/// [`cursor`]: Cursor
-/// [`node's`]: Node
+/// [`link`]: crate::node::Link
+/// [`cursor`]: crate::Cursor
+/// [`node's`]: crate::Node
 /// [`tree`]: crate::Tree
 unsafe impl<'tree, Value, Error> Send for Cursor<'tree, Value, Error> {}
 
@@ -207,8 +207,8 @@ impl<'tree, Value, Error> Drop for Cursor<'tree, Value, Error> {
     /// The [`cursor`] first returns to the `root`, releasing every
     /// intermediate [`node`], and then releases its final visit to the `root`.
     ///
-    /// [`node`]: Node
-    /// [`cursor`]: Cursor
+    /// [`node`]: crate::Node
+    /// [`cursor`]: crate::Cursor
     fn drop(&mut self) {
         let _ = self.go_to(&[0]); // `go_to()` could not fail in upward movement
         self.leave();
@@ -245,22 +245,21 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// first visitor, the [`node's`] children are [`populated`] before the
     /// [`cursor`] is returned.
     ///
-    /// # Errors
+    /// ## Errors
     ///
     /// Returns the [`callback`] error unchanged. In that case, no [`cursor`]
     /// is produced.
     ///
     /// ---
     ///
-    /// See the [`module documentation`] for more information.
+    /// See the [`cursor`] documentation for more information.
     ///
-    /// [`cursor`]: Cursor
-    /// [`link`]: Link
-    /// [`node`]: Node
-    /// [`node's`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`link`]: crate::node::Link
+    /// [`node`]: crate::Node
+    /// [`node's`]: crate::Node
     /// [`populated`]: crate::node::Callback
     /// [`callback`]: crate::node::Callback
-    /// [`module documentation`]: crate::cursor
     pub(crate) fn new(
         link: Link<Value, Error>,
         path: Vec<usize>,
@@ -283,7 +282,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// An empty `path` is considered invalid and leaves the [`cursor`]
     /// unchanged.
     ///
-    /// # Returns
+    /// ## Returns
     ///
     /// - `Ok(true)` - if the complete `path` exists and was selected;
     /// - `Ok(false)` - if the `path` is invalid;
@@ -292,14 +291,13 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     ///
     /// ---
     ///
-    /// See the [`module documentation`] for more information.
+    /// See the [`cursor`] documentation for more information.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
-    /// [`node's`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
+    /// [`node's`]: crate::Node
     /// [`tree's`]: crate::Tree
     /// [`populating`]: crate::node::Callback
-    /// [`module documentation`]: crate::cursor
     pub fn go_to(&mut self, path: &[usize]) -> Result<bool, Error> {
         if path.is_empty() {
             return Ok(false);
@@ -424,15 +422,14 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     ///
     /// ---
     ///
-    /// See the [`module documentation`] for more information.
+    /// See the [`cursor`] documentation for more information.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
-    /// [`direction`]: Direction
-    /// [`target`]: Target
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
+    /// [`direction`]: crate::cursor::Direction
+    /// [`target`]: crate::cursor::Target
     /// [`tree`]: crate::Tree
     /// [`populating`]: crate::node::Callback
-    /// [`module documentation`]: crate::cursor
     pub fn walk(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
             Direction::Up => Ok(self.up()),
@@ -510,17 +507,16 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     ///
     /// ---
     ///
-    /// See the [`module documentation`] for more information.
+    /// See the [`cursor`] documentation for more information.
     ///
-    /// [`cursor`]: Cursor
-    /// [`direction`]: Direction
-    /// [`walk()`]: Cursor::walk()
-    /// [`node`]: Node
-    /// [`nodes`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`direction`]: crate::cursor::Direction
+    /// [`walk()`]: crate::Cursor::walk()
+    /// [`node`]: crate::Node
+    /// [`nodes`]: crate::Node
     /// [`tree`]: crate::Tree
     /// [`tree's`]: crate::Tree
     /// [`populating`]: crate::node::Callback
-    /// [`module documentation`]: crate::cursor
     pub fn jump(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
             Direction::Up => self.jump_up(),
@@ -540,9 +536,9 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Returns the success of attempt or an `error` if [`populating`] a child
     /// [`node`] fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
-    /// [`target`]: Target
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
+    /// [`target`]: crate::cursor::crate::cursor::Target
     /// [`populating`]: crate::node::Callback
     fn down(&mut self, target: Target) -> Result<bool, Error> {
         let (children_len, child) = {
@@ -578,9 +574,9 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Always returns `true` or an `error` if [`populating`] a child [`node`]
     /// fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
-    /// [`target`]: Target
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
+    /// [`target`]: crate::cursor::Target
     /// [`tree's`]: crate::Tree
     /// [`populating`]: crate::node::Callback
     fn jump_down(&mut self, target: Target) -> Result<bool, Error> {
@@ -597,8 +593,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// ([`tree's`] `root`); in that case the [`cursor`] remains unchanged.
     /// Otherwise returns `true`.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     /// [`tree's`]: crate::Tree
     fn up(&mut self) -> bool {
         unsafe {
@@ -622,8 +618,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Returns `true` or an `error` if [`populating`] a child [`node`] during
     /// descend fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     /// [`tree's`]: crate::Tree
     /// [`populating`]: crate::node::Callback
     fn jump_up(&mut self) -> Result<bool, Error> {
@@ -643,8 +639,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Returns the success of attempt or an `error` if [`populating`] a next
     /// sibling [`node`] fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     /// [`tree's`]: crate::Tree
     /// [`populating`]: crate::node::Callback
     fn right(&mut self) -> Result<bool, Error> {
@@ -680,8 +676,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Always returns `true` or an `error` if [`populating`] a new [`node`]
     /// fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     /// [`tree`]: crate::Tree
     /// [`populating`]: crate::node::Callback
     fn jump_right(&mut self) -> Result<bool, Error> {
@@ -732,8 +728,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Returns the success of attempt or an `error` if [`populating`] a
     /// previous sibling [`node`] fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     /// [`populating`]: crate::node::Callback
     fn left(&mut self) -> Result<bool, Error> {
         unsafe {
@@ -770,8 +766,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// Always returns `true` or an `error` if [`populating`] a new [`node`]
     /// fails.
     ///
-    /// [`cursor`]: Cursor
-    /// [`node`]: Node
+    /// [`cursor`]: crate::Cursor
+    /// [`node`]: crate::Node
     /// [`tree`]: crate::Tree
     /// [`populating`]: crate::node::Callback
     fn jump_left(&mut self) -> Result<bool, Error> {

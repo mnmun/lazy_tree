@@ -275,21 +275,21 @@
 //!
 //! [MIT](https://github.com/mnmun/lazy_tree/blob/main/LICENSE)
 //!
-//! [`tree`]: Tree
-//! [`tree's`]: Tree
-//! [`trees`]: Tree
-//! [`node`]: Node
-//! [`nodes`]: Node
-//! [`node's`]: Node
+//! [`tree`]: crate::Tree
+//! [`tree's`]: crate::Tree
+//! [`trees`]: crate::Tree
+//! [`node`]: crate::Node
+//! [`nodes`]: crate::Node
+//! [`node's`]: crate::Node
 //! [`link`]: crate::node::Link
 //! [`links`]: crate::node::Link
-//! [`cursor`]: Cursor
-//! [`cursor-based`]: Cursor
-//! [`cursors`]: Cursor
+//! [`cursor`]: crate::Cursor
+//! [`cursor-based`]: crate::Cursor
+//! [`cursors`]: crate::Cursor
 //! [`callback`]: crate::node::Callback
 //! [`populated`]: crate::node::Callback
 //! [`Populate`]: crate::node::Callback
-//! [`value`]: Node::value()
+//! [`value`]: crate::Node::value()
 //! [`lazy_json`]: https://github.com/mnmun/lazy_json
 
 #![allow(dead_code)]

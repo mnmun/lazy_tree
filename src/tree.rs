@@ -6,12 +6,11 @@
 //!
 //! ---
 //!
-//! See the [`crate documentation`] for more information.
+//! See the [`crate`] documentation for more information.
 //!
 //! [`node`]: crate::Node
 //! [`nodes`]: crate::Node
-//! [`tree`]: Tree
-//! [`crate documentation`]: crate
+//! [`tree`]: crate::Tree
 use std::fmt::Debug;
 
 use crate::{
@@ -51,20 +50,20 @@ pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
 /// which it was created.
 ///
 /// `Tree` [`nodes`] are populated and released lazily by [`cursors`]. See the
-/// "Children" section in the [`node documentation`] for more information.
+/// "Children" section in the [`node`] documentation for more information.
 ///
 /// ---
 ///
-/// See the [`module documentation`] for more information.
+/// See the [`module`] documentation for more information.
 ///
-/// [`nodes`]: crate::Node
-/// [`link`]: Link
 /// [`node`]: crate::Node
-/// [`cursor()`]: Tree::cursor()
-/// [`cursor`]: Cursor
-/// [`cursors`]: Cursor
-/// [`node documentation`]: crate::Node
-/// [`module documentation`]: crate::tree
+/// [`nodes`]: crate::Node
+/// [`link`]: crate::node::Link
+/// [`node`]: crate::Node
+/// [`cursor()`]: crate::Tree::cursor()
+/// [`cursor`]: crate::Cursor
+/// [`cursors`]: crate::Cursor
+/// [`module`]: crate::tree
 pub struct Tree<Value, Error> {
     pub(crate) root: Link<Value, Error>,
 }
@@ -80,8 +79,8 @@ impl<Value, Error> Debug for Tree<Value, Error> {
 impl<'tree, Value, Error> Tree<Value, Error> {
     /// # Creates a [`tree`] using [`link`] to the `root` [`node`]
     ///
-    /// [`tree`]: Tree
-    /// [`link`]: Link
+    /// [`tree`]: crate::Tree
+    /// [`link`]: crate::node::Link
     /// [`node`]: crate::Node
     pub fn new(root: impl Into<Link<Value, Error>>) -> Self {
         Self { root: root.into() }
@@ -92,10 +91,10 @@ impl<'tree, Value, Error> Tree<Value, Error> {
     /// The returned [`cursor`] is positioned at the [`tree's`] `root` [`node`]
     /// and has [`path`] set to `[0]`.
     ///
-    /// [`cursor`]: Cursor
-    /// [`tree's`]: Tree
+    /// [`cursor`]: crate::Cursor
+    /// [`tree's`]: crate::Tree
     /// [`node`]: crate::Node
-    /// [`path`]: Cursor::path()
+    /// [`path`]: crate::Cursor::path()
     pub fn cursor(&'tree self) -> Result<Cursor<'tree, Value, Error>, Error> {
         Cursor::new(self.root, vec![0])
     }

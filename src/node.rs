@@ -10,13 +10,12 @@
 //!
 //! ---
 //!
-//! See the [`crate documentation`] for more information.
+//! See the [`crate`] documentation for more information.
 //!
-//! [`node`]: Node
-//! [`nodes`]: Node
+//! [`node`]: crate::Node
+//! [`nodes`]: crate::Node
 //! [`tree`]: crate::Tree
 //! [`non-null`]: NonNull
-//! [`crate documentation`]: crate
 use std::{cell::UnsafeCell, fmt::Debug, ptr::NonNull, sync::Mutex};
 
 /// # [`NonNull`] pointer to a [`node`]
@@ -27,10 +26,10 @@ use std::{cell::UnsafeCell, fmt::Debug, ptr::NonNull, sync::Mutex};
 ///
 /// ---
 ///
-/// See the [`module documentation`] for more information.
+/// See the [`module`] documentation for more information.
 ///
-/// [`node`]: Node
-/// [`module documentation`]: crate::node
+/// [`node`]: crate::Node
+/// [`module`]: crate::node
 pub type Link<Value, Error> = NonNull<Node<Value, Error>>;
 
 /// # Function used to create child [`nodes`]
@@ -89,22 +88,22 @@ pub type Link<Value, Error> = NonNull<Node<Value, Error>>;
 ///
 /// ---
 ///
-/// See the [`module documentation`] for more information.
+/// See the [`module`] documentation for more information.
 ///
-/// [`node`]: Node
-/// [`node's`]: Node
-/// [`nodes`]: Node
+/// [`node`]: crate::Node
+/// [`node's`]: crate::Node
+/// [`nodes`]: crate::Node
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
-/// [`link`]: Link
-/// [`links`]: Link
-/// [`module documentation`]: crate::node
+/// [`link`]: crate::node::Link
+/// [`links`]: crate::node::Link
+/// [`module`]: crate::node
 pub type Callback<Value, Error> =
     fn(&Value) -> Result<Box<[Link<Value, Error>]>, Error>;
 
 /// # Deallocates the subtree rooted at the [`link`]
 ///
-/// [`link`]: Link
+/// [`link`]: crate::node::Link
 pub(crate) fn drop_link<Value, Error>(link: Link<Value, Error>) {
     let mut delete_queue = vec![link];
     while let Some(mut node) = delete_queue.pop() {
@@ -142,18 +141,18 @@ pub(crate) fn drop_link<Value, Error>(link: Link<Value, Error>) {
 ///
 /// ---
 ///
-/// See the [`module documentation`] for more information.
+/// See the [`module`] documentation for more information.
 ///
 /// [`tree`]: crate::Tree
 /// [`non-null`]: NonNull
-/// [`value`]: Node::value()
-/// [`link`]: Link
-/// [`links`]: Link
-/// [`Links`]: Link
+/// [`value`]: crate::Node::value()
+/// [`link`]: crate::node::Link
+/// [`links`]: crate::node::Link
+/// [`Links`]: crate::node::Link
 /// [`cursors`]: crate::Cursor
 /// [`cursor`]: crate::Cursor
-/// [`callback`]: Callback
-/// [`module documentation`]: crate::node
+/// [`callback`]: crate::node::Callback
+/// [`module`]: crate::node
 pub struct Node<Value, Error> {
     pub(crate) parent: Option<Link<Value, Error>>,
     pub(crate) children: UnsafeCell<Box<[Link<Value, Error>]>>,
@@ -176,8 +175,8 @@ impl<Value, Error> Debug for Node<Value, Error> {
 impl<Value, Error> Node<Value, Error> {
     /// # Allocates a [`node`] and returns a [`link`] to it
     ///
-    /// [`node`]: Node
-    /// [`link`]: Link
+    /// [`node`]: crate::Node
+    /// [`link`]: crate::node::Link
     pub fn new(
         value: impl Into<Value>,
         callback: Callback<Value, Error>,
@@ -205,14 +204,14 @@ impl<Value, Error> Node<Value, Error> {
 
     /// # Returns a reference to the [`node's`] `value`
     ///
-    /// [`node's`]: Node
+    /// [`node's`]: crate::Node
     pub fn value(&self) -> &Value {
         &self.value
     }
 
     /// # Returns the shared references to the currently populated child [`nodes`]
     ///
-    /// [`nodes`]: Node
+    /// [`nodes`]: crate::Node
     pub fn children(&self) -> Box<[&Node<Value, Error>]> {
         unsafe {
             (*self.children.get())
@@ -224,7 +223,7 @@ impl<Value, Error> Node<Value, Error> {
 
     /// # Releases all children of the [`node`]
     ///
-    /// [`node`]: Node
+    /// [`node`]: crate::Node
     fn kill_children(&self) {
         for child in unsafe { self.children.get().replace(Box::default()) } {
             drop_link(child);
@@ -235,9 +234,9 @@ impl<Value, Error> Node<Value, Error> {
     ///
     /// Any previously populated children are released.
     ///
-    /// [`node's`]: Node
-    /// [`nodes`]: Node
-    /// [`callback`]: Callback
+    /// [`node's`]: crate::Node
+    /// [`nodes`]: crate::Node
+    /// [`callback`]: crate::node::Callback
     fn make_children(
         &self,
         link_to_itself: Link<Value, Error>,
@@ -282,9 +281,9 @@ impl<Value, Error> Node<Value, Error> {
     /// [`walk()`]: crate::Cursor::walk()
     /// [`jump()`]: crate::Cursor::jump()
     /// [`Direction::Down`]: crate::Direction::Down
-    /// [`node`]: Node
-    /// [`node's`]: Node
-    /// [`callback`]: Callback
+    /// [`node`]: crate::Node
+    /// [`node's`]: crate::Node
+    /// [`callback`]: crate::node::Callback
     pub(crate) fn visit(
         &self,
         link_to_itself: Link<Value, Error>,
@@ -319,8 +318,8 @@ impl<Value, Error> Node<Value, Error> {
     /// [`walk()`]: crate::Cursor::walk()
     /// [`jump()`]: crate::Cursor::jump()
     /// [`Direction::Up`]: crate::Direction::Up
-    /// [`node`]: Node
-    /// [`node's`]: Node
+    /// [`node`]: crate::Node
+    /// [`node's`]: crate::Node
     pub(crate) fn leave(&self) {
         let mut visitors = match self.visitors.lock() {
             Ok(guard) => guard,

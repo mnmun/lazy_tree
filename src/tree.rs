@@ -69,6 +69,7 @@ pub struct Tree<Value, Error> {
 }
 
 unsafe impl<Value, Error> Sync for Tree<Value, Error> {}
+unsafe impl<Value, Error> Send for Tree<Value, Error> {}
 
 impl<Value, Error> Debug for Tree<Value, Error> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

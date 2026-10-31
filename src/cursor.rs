@@ -1,9 +1,12 @@
-//! # [`Tree`] traversing with a [`cursor`]
+//! # [`Tree`] traversing tool
 //!
 //! ![](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
 //!
-//! Defines a [`cursor`] - the tool for traversing a [`tree`] of lazily
-//! populated [`nodes`].
+//! Defines a [`cursor`] - the tool for traversing a [`tree`] of lazily-created
+//! [`nodes`]. It can move between [`nodes`] within the [`tree`] and provides
+//! access to the `value` stored in the [`node`] it currently points to. As it
+//! moves, the [`cursor`] triggers the [creation] of any [`nodes`] it need
+//! to access, as well as the deletion of [`nodes`] that are no longer in use.
 //!
 //! ---
 //!
@@ -11,13 +14,18 @@
 //!
 //! [`tree`]: crate::Tree
 //! [`cursor`]: crate::Cursor
+//! [`node`]: crate::Node
 //! [`nodes`]: crate::Node
+//! [creation]: crate::callbacks::Query
 
 use std::{marker::PhantomData, ops::Deref};
 
 use getset::Getters;
 
-use crate::node::{Link, Node};
+use crate::node::Link;
+
+#[cfg(test)]
+use crate::Node;
 
 /// # Specifies which child [`cursor`] selects when moving down
 ///
@@ -55,7 +63,7 @@ pub enum Direction {
     /// [`node`]: crate::Node
     Up,
 
-    /// Moves the [`cursor`] to a child [`node`] selected by [`target`]
+    /// Moves the [`cursor`] to its child [`node`] selected by [`target`]
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
@@ -75,77 +83,57 @@ pub enum Direction {
     Right,
 }
 
-/// # [`Tree`] traversing tool
+/// # `Cursor`
 ///
 /// ![](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
 ///
-/// `Cursor` stores a [`link`] to the [`node`] it currently visits and the
-/// absolute [`path`] from the [`tree's`] `root` to that [`node`].
+/// Traverses a [`tree`] of lazily-created [`nodes`]. It can move between
+/// [`nodes`] within the [`tree`] and provides access to the `value` stored in
+/// the [`node`] it currently points to. As it moves, the `cursor` triggers
+/// the [creation] of any [`nodes`] it need to access, as well as the deletion
+/// of [`nodes`] that are no longer in use.
 ///
-/// `Cursor` dereferences to a [`&Node`], allowing direct access to the
-/// [`node's`] public data: [`value()`] and [`children()`].
+/// `Cursor` holds:
+///
+/// - [`link`] to the [`node`] it currently points;
+/// - [`path`] from the [`tree's`] `root` [`node`] to the [`node`] it currently
+///   points to.
+///
+/// `Cursor` dereferences to a `&Value`, allowing direct access to the
+/// [`node's`] `value`.
 ///
 /// [`Path`] contains one zero-based child index for each passed level in the
-/// [`tree`].
-///
-/// The following diagram shows the example [`tree`] in various states
-/// determined by the different positions of the `cursor`, indicated by
-/// asterisks:
-///
-/// ```plain
-///                                 ROOT
-///                  ROOT         ┌──┼──┐
-///    *ROOT*      ┌──┼──┐        A  B  C
-///   ┌──┼──┐      A *B* C        ┌──┼──┐
-///   A  B  C      ┌──┼──┐       *D* E  F
-///                D  E  F     ┌──┼──┐   
-///     (0)                    G  H  I   
-///                  (1)                 
-///                                (2)   
-///
-/// ┌──────┬─────────────────┬──────────────────┐
-/// │ Case │ Cursor position │ Cursor path      │
-/// ├──────┼─────────────────┼──────────────────┤
-/// │ (0)  │ ROOT            │ [0]              │
-/// ├──────┼─────────────────┼──────────────────┤
-/// │ (1)  │ B               │ [0, 1]           │
-/// ├──────┼─────────────────┼──────────────────┤
-/// │ (2)  │ D               │ [0, 1, 0]        │
-/// └──────┴─────────────────┴──────────────────┘
-/// ```
-///
-/// Thus, all valid [`paths`] could not be empty and should start with zero.
+/// [`tree`]. Valid [`path`] could not be empty and should start with zero.
 ///
 /// ## Creation
 ///
 /// Use the [`Tree::cursor()`] method to create a new `cursor` pointing to the
 /// [`tree's`] `root` [`node`] with the [`path`] set to `[0]`.
 ///
-/// [`Tree`] may have multiple `cursors` at the same time. `Cursors` implement
-/// [`Send`], so they can be transferred between threads safely. Each `cursor`
-/// remains borrowed from its [`tree`] and cannot outlive it.
+/// [`Tree`] can have multiple `cursors` at the same time. `Cursors` implement
+/// the [`Send`] trait, so they can be sent between threads safely. Each
+/// `cursor` remains borrowed from its [`tree`] and cannot outlive it.
 ///
 /// ## Traversing
 ///
 /// `Cursor` has several methods for moving between [`nodes`] in the [`tree`]:
 ///
 /// - [`go_to()`] - moves `cursor` to a [`node`] by a provided absolute `path`;
-/// - [`walk()`] - performs at most one edge traversal in provided
-///   [`direction`];
-/// - [`jump()`] - searches across parent, child and sibling branches when the
-///   adjacent move in provided [`direction`] is unavailable.
+/// - [`walk()`] - attempts to perform a movement within the current branch in
+///   the given `direction`;
+/// - [`jump()`] - performs a movement in the same way as the `walk()` method;
+///   in cases where such movement is not possible jumps to an adjacent branch.
 ///
 /// ---
 ///
 /// See the [`module`] documentation for more information.
 ///
+/// [`module`]: crate::cursor
 /// [`link`]: crate::node::Link
 /// [`node`]: crate::Node
 /// [`node's`]: crate::Node
 /// [`nodes`]: crate::Node
 /// [`&Node`]: crate::Node
-/// [`value()`]: crate::Node::value()
-/// [`children()`]: crate::Node::children()
 /// [`path`]: crate::Cursor::path()
 /// [`paths`]: crate::Cursor::path()
 /// [`Path`]: crate::Cursor::path()
@@ -157,21 +145,30 @@ pub enum Direction {
 /// [`walk()`]: crate::Cursor::walk()
 /// [`jump()`]: crate::Cursor::jump()
 /// [`direction`]: crate::cursor::Direction
-/// [`module`]: crate::cursor
+/// [creation]: crate::callbacks::Query
 #[derive(Debug, Getters)]
 pub struct Cursor<'tree, Value, Error> {
-    /// # [`Link`] to the [`node`] being currently observed
+    /// # [`Link`] to the [`node`] the [`cursor`] is currently pointing to
     ///
+    /// See the [`cursor`] documentation for more information.
+    ///
+    /// [`Link`]: crate::node::Link
     /// [`node`]: crate::Node
+    /// [`cursor`]: crate::Cursor
     pub(crate) link: Link<Value, Error>,
 
-    /// # Absolute `path` from the [`tree's`] `root` to the [`node`] being currently observed
+    /// # Absolute `path` from the [`tree's`] `root` [`node`] to the [`node`] it currently points to
     ///
-    /// Every subsequent element is the zero-based index of the selected child
-    /// at that [`tree`] level.
+    /// Every subsequent element is the zero-based `index` of the selected child
+    /// [`node`] at that [`tree`] level.
     ///
-    /// The `root` is located at the path `[0]`.
+    /// The `root` [`node`] is located at the path `[0]`.
     ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
+    ///
+    /// [`cursor`]: crate::Cursor
     /// [`tree`]: crate::Tree
     /// [`tree's`]: crate::Tree
     /// [`node`]: crate::Node
@@ -180,46 +177,59 @@ pub struct Cursor<'tree, Value, Error> {
 
     /// # Important!
     ///
-    /// Prevents the `cursor` from outliving the [`tree`] from which it was
+    /// Prevents the [`cursor`] from outliving the [`tree`] from which it was
     /// created.
     ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
+    ///
+    /// [`cursor`]: crate::Cursor
     /// [`tree`]: crate::Tree
     _marker: PhantomData<&'tree ()>,
 }
 
 /// # Safety
 ///
-/// [`Cursor`] contains a raw [`non-null`] pointer in a form of a [`link`]. It
-/// is safe to send a [`cursor`] to another thread because mutable access is
-/// synchronized by the [`node's`] `visitors` `mutex`, and the [`cursor`] is
-/// constrained by the lifetime of its [`tree`].
+/// [`Cursor`] contains a raw [`non-null`] pointer to a [`node`] (in the form
+/// of a [`link`]); it is safe to pass between threads because the [`node`] the
+/// [`cursor`] points to cannot be deleted before the [`cursor`] itself, and the
+/// [`cursor`] cannot outlive the [`tree`] from which it was created.
 ///
-/// [`non-null`]: std::ptr::NonNull
-/// [`link`]: crate::node::Link
+/// ---
+///
+/// See the [`cursor`] documentation for more information.
+///
 /// [`cursor`]: crate::Cursor
-/// [`node's`]: crate::Node
+/// [`non-null`]: std::ptr::NonNull
+/// [`node`]: crate::Node
+/// [`link`]: crate::node::Link
 /// [`tree`]: crate::Tree
 unsafe impl<'tree, Value, Error> Send for Cursor<'tree, Value, Error> {}
 
 impl<'tree, Value, Error> Drop for Cursor<'tree, Value, Error> {
-    /// # Releases all [`node`] visits held by this [`cursor`]
+    /// # Leaves all its [`nodes`]
     ///
-    /// The [`cursor`] first returns to the `root`, releasing every
-    /// intermediate [`node`], and then releases its final visit to the `root`.
+    /// The [`cursor`] returns to the `root` [`node`] and then leaves it.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`node`]: crate::Node
+    /// [`nodes`]: crate::Node
     /// [`cursor`]: crate::Cursor
     fn drop(&mut self) {
-        let _ = self.go_to(&[0]); // `go_to()` could not fail in upward movement
-        self.leave();
+        let _ = self.go_to(&[0]);
+        unsafe { self.link.as_mut().leave() }
     }
 }
 
 impl<'tree, Value, Error> Deref for Cursor<'tree, Value, Error> {
-    type Target = Node<Value, Error>;
+    type Target = Value;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.link.as_ref() }
+        unsafe { &self.link.as_ref().value }
     }
 }
 
@@ -241,14 +251,13 @@ fn vec_equ<T: PartialEq>(a: &[T], b: &[T]) -> Option<usize> {
 impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// # Creates a [`cursor`] pointed to the [`link`] with the given `path`
     ///
-    /// The [`cursor`] is registered as a visitor of the [`node`]. If it the
-    /// first visitor, the [`node's`] children are [`populated`] before the
-    /// [`cursor`] is returned.
+    /// Calls the [`enter()`] method for the [`node`], a [`link`] to which
+    /// was passed.
     ///
     /// ## Errors
     ///
-    /// Returns the [`callback`] error unchanged. In that case, no [`cursor`]
-    /// is produced.
+    /// Returns the [`total`] callback error unchanged. In that case, no
+    /// [`cursor`] is produced.
     ///
     /// ---
     ///
@@ -256,17 +265,15 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     ///
     /// [`cursor`]: crate::Cursor
     /// [`link`]: crate::node::Link
+    /// [`enter()`]: crate::Node::enter()
     /// [`node`]: crate::Node
-    /// [`node's`]: crate::Node
-    /// [`populated`]: crate::node::Callback
-    /// [`callback`]: crate::node::Callback
+    /// [`total`]: crate::callbacks::Total
     pub(crate) fn new(
-        link: Link<Value, Error>,
+        mut link: Link<Value, Error>,
         path: Vec<usize>,
     ) -> Result<Self, Error> {
-        unsafe {
-            link.as_ref().visit(link)?;
-        }
+        unsafe { link.as_mut().enter()? };
+
         Ok(Cursor {
             link,
             path,
@@ -274,20 +281,33 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         })
     }
 
-    /// # Moves the [`cursor`] to the [`node`] addressed by an absolute `path`
+    /// # Exposes the [`total`] value of the [`node`] being pointed to
     ///
-    /// The [`cursor`] follows the longest valid prefix of `path`. If no valid
-    /// prefix exist, the [`cursor`] returns to the [`tree's`] `root` (`[0]`).
+    /// Indicates the [`total`] number of possible child node.
     ///
-    /// An empty `path` is considered invalid and leaves the [`cursor`]
-    /// unchanged.
+    /// ---
     ///
-    /// ## Returns
+    /// See the [`cursor`] documentation for more information.
     ///
-    /// - `Ok(true)` - if the complete `path` exists and was selected;
-    /// - `Ok(false)` - if the `path` is invalid;
-    /// - `Err(error)` - if [`populating`] a [`node's`] children fails. Movement
-    ///   performed before the error is retained.
+    /// [`cursor`]: crate::Cursor
+    /// [`total`]: crate::callbacks::Total
+    /// [`node`]: crate::Node
+    pub fn total(&self) -> Option<usize> {
+        unsafe { self.link.as_ref().total }
+    }
+
+    /// # Attempts to move the [`cursor`] by an absolute `path`
+    ///
+    /// [`Cursor`] follows the provided absolute `path`; if a [`node`] cannot be
+    /// [`queried`] at any step, the attempt is considered **failed** and the
+    /// [`cursor`] remains at the last successfully reached [`node`].
+    ///
+    /// If the provided absolute `path` does not start from zero, the [`cursor`]
+    /// is returned to the `root` [`node`] and the attempt is considered
+    /// **failed**.
+    ///
+    /// Returns the success of the attempt or an `error` from [`Query`] or
+    /// [`Total`] callbacks if any of them fail.
     ///
     /// ---
     ///
@@ -295,9 +315,9 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`node's`]: crate::Node
-    /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`queried`]: crate::callbacks::Query
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     pub fn go_to(&mut self, path: &[usize]) -> Result<bool, Error> {
         if path.is_empty() {
             return Ok(false);
@@ -342,9 +362,10 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         Ok(result)
     }
 
-    /// # Attempts to perform exactly one movement in the given [`direction`]
+    /// # Attempts to move the [`cursor`] within the current branch in the given [`direction`]
     ///
-    /// Crosses at most one edge of the [`tree`]:
+    /// The movement of the [`cursor`], depending on the given [`direction`] can
+    /// be described by the following table:
     ///
     /// ```plain
     /// ┌───────────┬──────────────────────────────────────────┐
@@ -360,76 +381,98 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// └───────────┴──────────────────────────────────────────┘
     /// ```
     ///
-    /// If the requested adjacent [`node`] does not exist, the [`cursor`]
-    /// remains at its current position and the attempt to move is considered
-    /// failed. Otherwise the [`cursor`] successfully moves to the target
-    /// [`node`].
+    /// If the [`queried`] [`node`] does not exist, the [`cursor`] remains at
+    /// its current position and the attempt to move is considered **failed**.
+    /// Otherwise the [`cursor`] successfully moves to the target [`node`].
     ///
-    /// Returns the success of attempt or an `error` if [`populating`] a target
-    /// [`node`] fails.
+    /// Returns the success of the attempt or an `error` from [`Query`] or
+    /// [`Total`] callbacks if any of them fail.
     ///
-    /// # Examples
+    /// ## Details
     ///
-    /// Consider an example [`tree`] where the [`cursor`] initially points to
-    /// `B`:
-    ///
-    /// ```plain
-    ///             ROOT
-    ///      ┌───────┼───────┐
-    ///      A      *B*      C
-    ///   ┌──┼──┐ ┌──┼──┐ ┌──┼──┐
-    ///   D  E  F G  H  I J  K  L
-    ///
-    ///             (0)
-    /// ```
-    ///
-    /// The nodes `D`, `E`, `F`, `J`, `K` and `L` do not exist yet: children
-    /// are populated lazily when their parent is visited by [`cursor`]. They
-    /// are shown only to illustrate the complete logical shape of the [`tree`].
-    ///
-    /// The following calls succeed:
+    /// For the sake of illustration, let us consider a sample [`tree`]
+    /// containing a single [`cursor`], which is currently pointing to node `B`.
+    /// We will denote all [`nodes`] currently existing in memory using
+    /// parentheses `( )`; for the [`node`] currently pointed to by the
+    /// [`cursor`], we will add asterisks `* *` alongside the parentheses:
     ///
     /// ```plain
-    ///   *ROOT*        ROOT          ROOT                ROOT  
-    ///   ┌─┼─┐      ┌───┼───┐     ┌───┼───┐           ┌───┼───┐
-    ///   A B C      A   B   C     A   B  *C*         *A*  B   C
-    ///               ┌──┼──┐           ┌──┼──┐     ┌──┼──┐     
-    ///              *G* H  I           J  K  L     D  E  F     
-    ///                                                         
-    ///    (1)          (2)            (3)               (4)    
+    ///                 (ROOT)             
+    ///       ┌───────────┼───────────┐     
+    ///       A         *(B)*         C     
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///   D   E   F   G   H   I   J   K   L
+    ///
+    ///                   0)
     /// ```
     ///
-    /// - `(1)` = `(0)` + `walk(Direction::Up)`
-    /// - `(2)` = `(0)` + `walk(Direction::Down(Target::First))`
-    /// - `(3)` = `(0)` + `walk(Direction::Right)`
-    /// - `(4)` = `(0)` + `walk(Direction::Left)`
+    /// The diagram above shows a [`tree`] in which only two [`nodes`] currently
+    /// exist: `ROOT` and `B` because they are used by the [`cursor`]. The other
+    /// [`nodes`] are shown only to demonstrate the complete shape of the
+    /// [`tree`].
+    ///
+    /// The following [`cursor`] movements are successful, as they occur within
+    /// the bounds of the [`cursor's`] current branch:
+    ///
+    /// - `1)` = `0)` + `walk(Direction::Up)`
+    /// - `2)` = `0)` + `walk(Direction::Down(Target::First))`
+    /// - `3)` = `0)` + `walk(Direction::Right)`
+    /// - `4)` = `0)` + `walk(Direction::Left)`
+    ///
+    /// where
+    ///
+    /// ```plain
+    ///                *(ROOT)*                               (ROOT)         
+    ///       ┌───────────┼───────────┐             ┌───────────┼───────────┐    
+    ///       A           B           C             A          (B)          C    
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐     ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///   D   E   F   G   H   I   J   K   L     D   E   F *(G)* H   I   J   K   L
+    ///                                                           
+    ///                   1)                                    2)            
+    ///
+    ///
+    ///                 (ROOT)                                (ROOT)            
+    ///       ┌───────────┼───────────┐             ┌───────────┼───────────┐    
+    ///       A           B         *(C)*         *(A)*         B           C    
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐     ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///   D   E   F   G   H   I   J   K   L     D   E   F   G   H   I   J   K   L
+    ///                                                           
+    ///                   3)                                    4)            
+    /// ```
     ///
     /// Keep in mind that horizontal movements are internally implemented as a
     /// sequence of vertical movements. They can therefore be expressed as
     /// follows:
     ///
-    /// - `(3)` = `(0)` + `walk(Direction::Up)` + `walk(Direction::Down(Target::Last))`
-    /// - `(4)` = `(0)` + `walk(Direction::Up)` + `walk(Direction::Down(Target::First))`
+    /// - `3)` = `0)` + `walk(Direction::Up)` + `walk(Direction::Down(Target::Index(i + 1)))`
+    /// - `4)` = `0)` + `walk(Direction::Up)` + `walk(Direction::Down(Target::Index(i - 1)))`
     ///
-    /// In the following cases, the requested adjacent [`node`] does not exist.
-    /// The [`cursor`] therefore remains in place and `walk()` returns
-    /// `false`:
+    /// where `i` is `index` of the node `B`, in this case `i = 1`.
     ///
-    /// - `(1)` + `walk(Direction::Up)` (`ROOT` has no parent)
-    /// - `(2)` + `walk(Direction::Down(...))` (`G` is a leaf)
-    /// - `(3)` + `walk(Direction::Right)` (`C` is the last sibling)
-    /// - `(4)` + `walk(Direction::Left)` (`A` is the first sibling)
+    /// In the following cases, the queried [`node`] in the current branch does
+    /// not exist. The [`cursor`] therefore remains in place and the `walk()`
+    /// method returns `false`:
+    ///
+    /// - `1)` + `walk(Direction::Up)`
+    /// - `2)` + `walk(Direction::Down(...))`
+    /// - `2)` + `walk(Direction::Left)`
+    /// - `3)` + `walk(Direction::Right)`
+    /// - `4)` + `walk(Direction::Left)`
     ///
     /// ---
     ///
     /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
+    /// [`cursor's`]: crate::Cursor
     /// [`node`]: crate::Node
+    /// [`nodes`]: crate::Node
     /// [`direction`]: crate::cursor::Direction
     /// [`target`]: crate::cursor::Target
     /// [`tree`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`Query`]: crate::callbacks::Query
+    /// [`queried`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     pub fn walk(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
             Direction::Up => Ok(self.up()),
@@ -439,13 +482,14 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         }
     }
 
-    /// # Performs a directional search that may cross multiple [`tree`] edges
+    /// # Moves the [`cursor`] in the given [`direction`] with a possible branch switch
     ///
-    /// Behaves like [`walk()`] when the requested adjacent [`node`] exists.
+    /// Behaves in the same way as the [`walk()`] method for those cases where
+    /// [`walk()`] returns `true`.
     ///
-    /// If [`walk()`] cannot make the requested move, `jump()` continues
-    /// searching in the same [`direction`] and moves the [`cursor`] according
-    /// to the rules described below:
+    /// For all other cases (where the [`walk()`] method cannot perform the
+    /// requested movement) the [`cursor's`] movement, depending on the given
+    /// [`direction`] can be described by the following table:
     ///
     /// ```plain
     /// ┌───────────┬─────────────────────────────────────────────────────────┐
@@ -455,68 +499,103 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// ├───────────┼─────────────────────────────────────────────────────────┤
     /// │ Down      │ Tree's root                                             │
     /// ├───────────┼─────────────────────────────────────────────────────────┤
-    /// │ Right     │ Node of the next branch got by descending through first │
-    /// │           │ children                                                │
+    /// │ Right     │ Node of the next adjacent branch got by descending      │
+    /// │           │ through first children                                  │
     /// ├───────────┼─────────────────────────────────────────────────────────┤
-    /// │ Left      │ Node of the previous branch got by descending through   │
-    /// │           │ last children                                           │
+    /// │ Left      │ Node of the previous adjacent branch got by descending  │
+    /// │           │ through last children                                   │
     /// └───────────┴─────────────────────────────────────────────────────────┘
     /// ```
     ///
     /// When no branch exists in the requested horizontal [`direction`], the
     /// search wraps around the [`tree`].
     ///
-    /// Always return `true` or an `error` if [`populating`] a [`node`] fails.
+    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// any of them fail.
     ///
-    /// # Examples
+    /// ## Details
     ///
-    /// The four configurations below are the successful results from the
-    /// corresponding [`walk()`] calls in its example:
-    ///
-    /// ```plain
-    ///   *ROOT*        ROOT          ROOT                ROOT  
-    ///   ┌─┼─┐      ┌───┼───┐     ┌───┼───┐           ┌───┼───┐
-    ///   A B C      A   B   C     A   B  *C*         *A*  B   C
-    ///               ┌──┼──┐           ┌──┼──┐     ┌──┼──┐     
-    ///              *G* H  I           J  K  L     D  E  F     
-    ///                                                         
-    ///    (1)          (2)            (3)               (4)    
-    /// ```
-    ///
-    /// Applying `jump()` to the cases where [`walk()`] could not move produces
-    /// the following states:
+    /// The four diagrams below show the results of successful calls to the
+    /// [`walk()`] method, as described in the [`walk()`] method documentation:
     ///
     /// ```plain
-    ///         ROOT       *ROOT*           ROOT          ROOT         
-    ///      ┌───┼───┐     ┌─┼─┐         ┌───┼───┐     ┌───┼───┐       
-    ///      A   B   C     A B C        *A*  B   C     A   B  *C*      
-    ///   ┌──┼──┐                     ┌──┼──┐               ┌──┼──┐    
-    ///  *D* E  F                     D  E  F               J  K  L    
-    ///                                                                
-    ///        (5)          (6)            (7)             (8)         
+    ///                *(ROOT)*                               (ROOT)         
+    ///       ┌───────────┼───────────┐             ┌───────────┼───────────┐    
+    ///       A           B           C             A          (B)          C    
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐     ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///   D   E   F   G   H   I   J   K   L     D   E   F *(G)* H   I   J   K   L
+    ///                                                           
+    ///                   1)                                    2)            
+    ///
+    ///
+    ///                 (ROOT)                                (ROOT)         
+    ///       ┌───────────┼───────────┐             ┌───────────┼───────────┐    
+    ///       A           B         *(C)*         *(A)*         B           C    
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐     ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///   D   E   F   G   H   I   J   K   L     D   E   F   G   H   I   J   K   L
+    ///                                                           
+    ///                   3)                                    4)            
     /// ```
     ///
-    /// - `(5)` = `(1)` + `jump(Direction::Up)` (wrap from `ROOT` to the
-    ///   deepest leaf [`node`] in the first-child based `path`)
-    /// - `(6)` = `(2)` + `jump(Direction::Down(...))` (return to the `ROOT`
-    ///   because `G` has no children)
-    /// - `(7)` = `(3)` + `jump(Direction::Right)` (wrap to the first [`node`]
-    ///   at the same depth)
-    /// - `(8)` = `(4)` + `jump(Direction::Left)` (wrap to the last [`node`]
-    ///   at the same depth)
+    /// *Reminder*: In the diagram above, all [`nodes`] currently existing in
+    /// memory are denoted with parentheses `( )`, while the [`node`] pointed
+    /// to by the [`cursor`] is denoted with both parentheses and asterisks
+    /// `*( )*`. [`Nodes`] without such markings do not exist in memory; they
+    /// are shown solely to illustrate the complete shape of the [`tree`].
+    ///
+    /// Applying the `jump()` method, to the cases where the [`walk()`] method
+    /// could not move, produces the following states:
+    ///
+    /// - `5)` = `1)` + `jump(Direction::Up)`
+    /// - `6)` = `2)` + `jump(Direction::Down(...))`
+    /// - `7)` = `2)` + `jump(Direction::Left)`
+    /// - `8)` = `3)` + `jump(Direction::Right)`
+    /// - `9)` = `4)` + `jump(Direction::Left)`
+    ///
+    /// where
+    ///
+    /// ```plain
+    ///                 (ROOT)                               *(ROOT)*            
+    ///       ┌───────────┼───────────┐             ┌───────────┼───────────┐    
+    ///      (A)          B           C             A           B           C    
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐     ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    /// *(D)* E   F   G   H   I   J   K   L     D   E   F   G   H   I   J   K   L
+    ///                                                                          
+    ///                   5)                                    6)               
+    ///
+    ///
+    ///                 (ROOT)                                (ROOT)         
+    ///       ┌───────────┼───────────┐             ┌───────────┼───────────┐    
+    ///      (A)          B           C           *(A)*         B           C    
+    ///   ┌───┼───┐   ┌───┼───┐   ┌───┼───┐     ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///   D   E *(F)* G   H   I   J   K   L     D   E   F   G   H   I   J   K   L
+    ///                                                           
+    ///                   7)                                    8)            
+    ///
+    ///
+    ///                                    (ROOT)              
+    ///                          ┌───────────┼───────────┐     
+    ///                          A           B         *(C)*   
+    ///                      ┌───┼───┐   ┌───┼───┐   ┌───┼───┐
+    ///                      D   E   F   G   H   I   J   K   L
+    ///                                                        
+    ///                                      9)                
+    /// ```
     ///
     /// ---
     ///
     /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
+    /// [`cursor's`]: crate::Cursor
     /// [`direction`]: crate::cursor::Direction
     /// [`walk()`]: crate::Cursor::walk()
     /// [`node`]: crate::Node
     /// [`nodes`]: crate::Node
     /// [`tree`]: crate::Tree
     /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     pub fn jump(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
             Direction::Up => self.jump_up(),
@@ -526,59 +605,82 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         }
     }
 
-    /// # Attempts to move the [`cursor`] to the child [`node`] selected by [`target`]
+    /// # Attempts to move the [`cursor`] to its child [`node`] selected by [`target`]
     ///
-    /// The [`cursor`] remains unchanged and attempt to move is considered
-    /// failed when the selected child does not exist. On success, the
-    /// [`cursor`] registers a visit to the child and appends its index to the
-    /// current `path`.
+    /// The [`cursor`] moves to the [`target`] child [`node`], [`entering`] that
+    /// [`node`]. If the `index` of the [`target`] child [`node`] is out of
+    /// bounds (`0 <= index < total`), the attempt is considered **failed**, and
+    /// the [`cursor`] remains unchanged.
     ///
-    /// Returns the success of attempt or an `error` if [`populating`] a child
-    /// [`node`] fails.
+    /// Returns the success of the attempt or an `error` from [`Query`] or
+    /// [`Total`] callbacks if any of them fail.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`target`]: crate::cursor::crate::cursor::Target
-    /// [`populating`]: crate::node::Callback
+    /// [`entering`]: crate::Node::enter()
+    /// [`target`]: crate::cursor::Target
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn down(&mut self, target: Target) -> Result<bool, Error> {
-        let (children_len, child) = {
-            let children = unsafe { &*self.children.get() };
+        unsafe {
+            let total = self.link.as_ref().total.as_ref().unwrap();
 
-            let children_len = children.len();
-            let child = match target {
-                Target::First => children.first().cloned(),
-                Target::Last => children.last().cloned(),
-                Target::Index(i) => children.get(i).cloned(),
+            let index = match target {
+                Target::First => 0,
+                Target::Last => total.saturating_sub(1),
+                Target::Index(i) => i,
             };
 
-            (children_len, child)
-        };
+            if index >= *total {
+                return Ok(false);
+            }
 
-        if let Some(child) = child {
-            unsafe { child.as_ref().visit(child)? };
-            self.link = child;
-            self.path.push(match target {
-                Target::First => 0,
-                Target::Last => children_len - 1,
-                Target::Index(i) => i,
-            });
+            let mut children = match self.link.as_ref().children.lock() {
+                Ok(guard) => guard,
+                Err(poison) => poison.into_inner(),
+            };
 
-            return Ok(true);
+            let mut node = if let Some(node) = children.get(&index) {
+                *node
+            } else {
+                let node = (self.link.as_ref().callbacks.query)(
+                    &self.link.as_mut().value,
+                    index,
+                )?
+                .with_parent(self.link)
+                .build();
+
+                children.insert(index, node);
+                *children.get(&index).unwrap()
+            };
+
+            node.as_mut().enter()?;
+            self.link = node;
+            self.path.push(index);
+
+            Ok(true)
         }
-
-        Ok(false)
     }
 
-    /// # Moves the [`cursor`] to the child [`node`] selected by [`target`] or the [`tree's`] `root`
+    /// # Moves the [`cursor`] to the [`target`] child [`node`] or the [`tree`] `root`
     ///
-    /// Always returns `true` or an `error` if [`populating`] a child [`node`]
-    /// fails.
+    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// any of them fail.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
     /// [`target`]: crate::cursor::Target
-    /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`tree`]: crate::Tree
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn jump_down(&mut self, target: Target) -> Result<bool, Error> {
         if !self.down(target)? {
             self.go_to(&[0])?;
@@ -587,21 +689,30 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         Ok(true)
     }
 
-    /// # Attempts to move the [`cursor`] to the parent [`node`]
+    /// # Attempts to move the [`cursor`] to its parent [`node`]
     ///
-    /// Returns `false` when the current [`node`] does not have a parent
-    /// ([`tree's`] `root`); in that case the [`cursor`] remains unchanged.
-    /// Otherwise returns `true`.
+    /// The [`cursor`] moves to the parent [`node`], [`leaving`] the current
+    /// child [`node`]. If there is no parent [`node`], the attempt is
+    /// considered **failed**, and the [`cursor`] remains unchanged.
+    ///
+    /// Returns the success of the attempt or an `error` from [`Query`] or
+    /// [`Total`] callbacks if any of them fail.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`tree's`]: crate::Tree
+    /// [`leaving`]: crate::Node::leave()
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn up(&mut self) -> bool {
         unsafe {
             if let Some(parent) = self.link.as_ref().parent {
-                self.link.as_ref().leave();
+                self.link.as_mut().leave();
                 self.link = parent;
-                self.path.pop();
+                self.link.as_mut().cleanup(self.path.pop().unwrap());
 
                 return true;
             }
@@ -610,18 +721,25 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         false
     }
 
-    /// # Moves the [`cursor`] to the parent [`node`] or the deepest leaf [`node`]
+    /// # Moves the [`cursor`] to its parent [`node`] or the deepest leaf [`node`]
     ///
-    /// If the [`cursor`] is already at the [`tree's`] `root`, descends though
-    /// first children until reaching the deepest leaf [`node`].
+    /// If the [`cursor`] is already at the [`tree`] `root` [`node`], descends
+    /// though first child [`nodes`] until reaching the deepest leaf [`node`].
+    /// Otherwise moves the [`cursor`] to its parent [`node`].
     ///
-    /// Returns `true` or an `error` if [`populating`] a child [`node`] during
-    /// descend fails.
+    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// any of them fail.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`nodes`]: crate::Node
+    /// [`tree`]: crate::Tree
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn jump_up(&mut self) -> Result<bool, Error> {
         if !self.up() {
             while self.down(Target::First)? {}
@@ -632,88 +750,83 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
 
     /// # Attempts to move the [`cursor`] to the next sibling [`node`] in same branch
     ///
-    /// The [`cursor`] remains unchanged and attempt to move is considered
-    /// failed when the current [`node`] is the last child or is the [`tree's`]
-    /// `root`.
+    /// Executes the [`up()`] method followed by [`down(Target::Index(i + 1))`],
+    /// where `i` - is the `index` of the current [`node`] pointed to by the
+    /// [`cursor`]. If the [`down(Target::Index(i + 1))`] movement cannot be
+    /// performed, the [`cursor`] is returned to the previous [`node`] using
+    /// [`down(Target::Index(i))`], and the attempt is considered **failed**.
     ///
-    /// Returns the success of attempt or an `error` if [`populating`] a next
-    /// sibling [`node`] fails.
+    /// Returns the success of the attempt or an `error` from [`Query`] or
+    /// [`Total`] callbacks if any of them fail.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`tree's`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`up()`]: crate::Cursor::up()
+    /// [`down(Target::Index(i + 1))`]: crate::Cursor::down()
+    /// [`down(Target::Index(i))`]: crate::Cursor::down()
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn right(&mut self) -> Result<bool, Error> {
-        unsafe {
-            if let Some(parent) = self.link.as_ref().parent {
-                let i = self.path.last_mut().unwrap();
+        let i = *self.path.last().unwrap();
 
-                let children = &*parent.as_ref().children.get();
-
-                if let Some(new_node) = children.get(*i + 1) {
-                    new_node.as_ref().visit(*new_node)?;
-                    self.link.as_ref().leave();
-                    self.link = *new_node;
-                    *i += 1;
-
-                    return Ok(true);
-                }
-            }
+        if !self.up() {
+            return Ok(false);
         }
 
-        Ok(false)
+        if !self.down(Target::Index(i + 1))? {
+            self.down(Target::Index(i))?;
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 
-    /// # Moves the [`cursor`] to the next sibling [`node`] in same or adjacent branch
+    /// # Moves the [`cursor`] to the next sibling [`node`] in the same or an adjacent branch
     ///
-    /// When the current [`node`] is the last child, the [`cursor`] moves upward
-    /// untill a branch with a next sibling is found, then descends through
-    /// first children to preserve the original depth when possible.
+    /// Executes the [`up()`] method followed by [`down(Target::Index(i + 1))`],
+    /// where `i` - is the `index` of the current [`node`] pointed to by the
+    /// [`cursor`]. If the [`down(Target::Index(i + 1))`] movement cannot be
+    /// performed, the [`cursor`] executes [`up()`] and tries again for a new
+    /// `i` value in a loop until [`down(Target::Index(i + 1))`] is executed
+    /// successfully or the [`cursor`] reaches the `root` [`node`]. After
+    /// exiting the loop, the [`cursor`] descends to the same depth as it was
+    /// at the beginning using [`down(Target::First)`] in the loop.
     ///
-    /// If no branch is available to the right, the traversal wraps around the
-    /// [`tree`].
+    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// any of them fail.
     ///
-    /// Always returns `true` or an `error` if [`populating`] a new [`node`]
-    /// fails.
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`tree`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`up()`]: crate::Cursor::up()
+    /// [`down(Target::Index(i + 1))`]: crate::Cursor::down()
+    /// [`down(Target::Index(i))`]: crate::Cursor::down()
+    /// [`down(Target::First)`]: crate::Cursor::down()
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn jump_right(&mut self) -> Result<bool, Error> {
         let initial_path_len = self.path.len();
 
-        unsafe {
-            while let Some(parent) = self.link.as_ref().parent {
-                let i = self.path.last_mut().unwrap();
+        let mut i = *self.path.last().unwrap();
 
-                let children = &*parent.as_ref().children.get();
-
-                let new_node = children.get(*i + 1).cloned();
-
-                if let Some(new_node) = new_node {
-                    self.link.as_ref().leave();
-                    self.link = new_node;
-                    self.link.as_ref().visit(self.link)?;
-                    *i += 1;
-                    break;
-                } else {
-                    self.link.as_ref().leave();
-                    self.link = parent;
-                    self.path.pop();
-                }
+        while self.up() {
+            if self.down(Target::Index(i + 1))? {
+                break;
             }
 
-            while self.path.len() != initial_path_len {
-                let child = (&*self.children.get()).first().cloned();
+            i = *self.path.last().unwrap();
+        }
 
-                if let Some(child) = child {
-                    self.link = child;
-                    self.link.as_ref().visit(self.link)?;
-                    self.path.push(0);
-                } else {
-                    break;
-                }
+        while self.path.len() != initial_path_len {
+            if !self.down(Target::First)? {
+                break;
             }
         }
 
@@ -722,99 +835,99 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
 
     /// # Attempts to move the [`cursor`] to the previous sibling [`node`] in same branch
     ///
-    /// The [`cursor`] remains unchanged and attempt to move is considered
-    /// failed when the currrent [`node`] is the first child or is the `root`.
+    /// Executes the [`up()`] method followed by [`down(Target::Index(i - 1))`],
+    /// where `i` - is the `index` of the current [`node`] pointed to by the
+    /// [`cursor`]. If the [`down(Target::Index(i - 1))`] movement cannot be
+    /// performed, the [`cursor`] is returned to the previous [`node`] using
+    /// [`down(Target::Index(i))`], and the attempt is considered **failed**.
     ///
-    /// Returns the success of attempt or an `error` if [`populating`] a
-    /// previous sibling [`node`] fails.
+    /// Returns the success of the attempt or an `error` from [`Query`] or
+    /// [`Total`] callbacks if any of them fail.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`populating`]: crate::node::Callback
+    /// [`up()`]: crate::Cursor::up()
+    /// [`down(Target::Index(i - 1))`]: crate::Cursor::down()
+    /// [`down(Target::Index(i))`]: crate::Cursor::down()
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn left(&mut self) -> Result<bool, Error> {
-        unsafe {
-            if let Some(parent) = self.link.as_ref().parent {
-                let i = self.path.last_mut().unwrap();
+        let i = *self.path.last().unwrap();
 
-                if *i > 0 {
-                    let children = &*parent.as_ref().children.get();
-
-                    if let Some(new_node) = children.get(*i - 1) {
-                        self.link.as_ref().leave();
-                        self.link = *new_node;
-                        self.link.as_ref().visit(self.link)?;
-                        *i -= 1;
-
-                        return Ok(true);
-                    }
-                }
-            }
+        if i == 0 {
+            return Ok(false);
         }
 
-        Ok(false)
+        if !self.up() {
+            return Ok(false);
+        }
+
+        if !self.down(Target::Index(i - 1))? {
+            self.down(Target::Index(i))?;
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 
-    /// # Moves the [`cursor`] to the previous sibling [`node`] in same or adjacent branch
+    /// # Moves the [`cursor`] to the previous sibling [`node`] in the same or an adjacent branch
     ///
-    /// When the current [`node`] is the first child, the [`cursor`] moves
-    /// upward untill a branch with a previous sibling is found, then descends
-    /// though last children to preserve the original depth when possible.
+    /// Executes the [`up()`] method followed by [`down(Target::Index(i - 1))`],
+    /// where `i` - is the `index` of the current [`node`] pointed to by the
+    /// [`cursor`]. If the [`down(Target::Index(i - 1))`] movement cannot be
+    /// performed, the [`cursor`] executes [`up()`] and tries again for a new
+    /// `i` value in a loop until [`down(Target::Index(i - 1))`] is executed
+    /// successfully or the [`cursor`] reaches the `root` [`node`]. After
+    /// exiting the loop, the [`cursor`] descends to the same depth as it was
+    /// at the beginning using [`down(Target::Last)`] in the loop.
     ///
-    /// If no branch is available to the left, the traversal wraps around the
-    /// [`tree`].
+    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// any of them fail.
     ///
-    /// Always returns `true` or an `error` if [`populating`] a new [`node`]
-    /// fails.
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`tree`]: crate::Tree
-    /// [`populating`]: crate::node::Callback
+    /// [`up()`]: crate::Cursor::up()
+    /// [`down(Target::Index(i - 1))`]: crate::Cursor::down()
+    /// [`down(Target::Index(i))`]: crate::Cursor::down()
+    /// [`down(Target::Last)`]: crate::Cursor::down()
+    /// [`Query`]: crate::callbacks::Query
+    /// [`Total`]: crate::callbacks::Total
     fn jump_left(&mut self) -> Result<bool, Error> {
         let initial_path_len = self.path.len();
 
-        unsafe {
-            while let Some(parent) = self.link.as_ref().parent {
-                let i = self.path.last_mut().unwrap();
+        let mut i = *self.path.last().unwrap();
 
-                if *i > 0 {
-                    let children = &*parent.as_ref().children.get();
-
-                    let new_node = children.get(*i - 1).cloned();
-
-                    if let Some(new_node) = new_node {
-                        self.link.as_ref().leave();
-                        self.link = new_node;
-                        self.link.as_ref().visit(self.link)?;
-                        *i -= 1;
-                        break;
-                    } else {
-                        unreachable!()
-                    }
-                } else {
-                    self.link.as_ref().leave();
-                    self.link = parent;
-                    self.path.pop();
-                }
+        while self.up() {
+            if i != 0 {
+                self.down(Target::Index(i - 1))?;
+                break;
             }
 
-            while self.path.len() != initial_path_len {
-                let (child, i) = {
-                    let children = &*self.children.get();
-                    (children.last().cloned(), children.len())
-                };
+            i = *self.path.last().unwrap();
+        }
 
-                if let Some(child) = child {
-                    self.link = child;
-                    self.link.as_ref().visit(self.link)?;
-                    self.path.push(i - 1);
-                } else {
-                    break;
-                }
+        while self.path.len() != initial_path_len {
+            if !self.down(Target::Last)? {
+                break;
             }
         }
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+impl<Value, Error> Cursor<'_, Value, Error> {
+    pub fn node(&self) -> &Node<Value, Error> {
+        unsafe { self.link.as_ref() }
     }
 }
 

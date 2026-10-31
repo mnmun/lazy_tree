@@ -1,8 +1,10 @@
-//! # [`Tree`] of lazily populated [`nodes`]
+//! # [`Tree`] of lazily-created [`nodes`]
 //!
 //! ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 //!
-//! Defines a [`tree`] - the owner of a `root` [`node`].
+//! Defines a [`tree`] - a wrapper around the [`link`] to the `root` [`node`]
+//! with the ability to [create] [`cursors`] for traversing hierarchical
+//! structure of lazily-created [`nodes`].
 //!
 //! ---
 //!
@@ -11,64 +13,115 @@
 //! [`node`]: crate::Node
 //! [`nodes`]: crate::Node
 //! [`tree`]: crate::Tree
+//! [`link`]: crate::node::Link
+//! [create]: crate::Tree::cursor()
+//! [`cursors`]: crate::Cursor
 use std::fmt::Debug;
 
 use crate::{
     Cursor,
-    node::{Link, drop_link},
+    node::{self, Link, drop_link},
 };
 
-#[cfg(feature = "debug")]
+#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// # Counts live [`nodes`]
 ///
-/// The counter is incremented by [`Node::new()`] when a [`node`] is allocated
-/// and decremented by [`Node::drop()`]. [`Tree::drop()`] checks that the
-/// counter is zero after releasing the [`tree`] `root`; a non-zero value
-/// indicates that one or more [`nodes`] were leaked.
+/// The counter is incremented when a [`node`] is created using the
+/// [`Builder::build()`] method and decremented when a [`node`] is deleted via
+/// the [`Node::drop()`] method. The [`Tree::drop()`] method verifies that the
+/// counter is equal to zero after the [`tree's`] `root` [`node`] has been
+/// deleted; a non-zero counter value indicates a memory leak - meaning some
+/// [`nodes`] were not properly removed.
+///
+/// ---
+///
+/// See the [`node`] documentation for more information.
 ///
 /// [`node`]: crate::Node
 /// [`nodes`]: crate::Node
-/// [`Node::new()`]: crate::Node::new()
+/// [`Builder::build()`]: crate::node::Builder::build()
 /// [`Node::drop()`]: crate::Node::drop()
 /// [`tree`]: crate::Tree
+/// [`tree's`]: crate::Tree
 /// [`Tree::drop()`]: crate::Tree::drop()
-#[cfg(feature = "debug")]
+#[cfg(test)]
 pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
 
-/// # `Tree` of lazily populated [`nodes`]
+/// # `Tree` of lazily-created [`nodes`]
 ///
 /// ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 ///
-/// `Tree` holds a [`link`] to the `root` [`node`] and can be created using
-/// the [`Tree::new()`] method.
+/// Holds a [`link`] to the `root` [`node`] and provides a [`cursor()`] method
+/// for creating new [`cursors`].
 ///
-/// The `tree` of [`nodes`] can be traversed using [`cursors`] created via the
-/// [`cursor()`] method. There is no limit to the number of [`cursors`] for the
-/// `tree` and keep in mind that a [`cursor`] cannot outlive the `tree` from
-/// which it was created.
+/// `Tree` implements the [`Sync`] and [`Send`] traits, which allow a single
+/// `tree` to be shared among multiple threads, as well as sent between
+/// threads.
 ///
-/// `Tree` [`nodes`] are populated and released lazily by [`cursors`]. See the
-/// "Children" section in the [`node`] documentation for more information.
+/// ## Creation
+///
+/// Can be created using the [`Tree::new()`] method, which takes the `root`
+/// [`node`] [`builder`] as an argument.
+///
+/// ## Traversing
+///
+/// Traversing a `tree` of lazily-created [`nodes`] is performed using
+/// [`cursors`], which move between [`nodes`] and trigger the [creation] and
+/// deletion of `tree` [`nodes`]. A [`cursor`] provides access to the `value`
+/// stored in the [`node`] it currently points to.
+///
+/// `Tree` may have multiple [`cursors`] at the same time, pointing to
+/// different [`nodes`] and moving independently of each other. [`Cursors`]
+/// implement the [`Send`] trait, so they can be sent between threads safely.
+/// Each [`cursor`] remains borrowed from its `tree` and cannot outlive it.
 ///
 /// ---
 ///
 /// See the [`module`] documentation for more information.
 ///
+/// [`module`]: crate::tree
 /// [`node`]: crate::Node
 /// [`nodes`]: crate::Node
 /// [`link`]: crate::node::Link
-/// [`node`]: crate::Node
 /// [`cursor()`]: crate::Tree::cursor()
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
-/// [`module`]: crate::tree
+/// [`Cursors`]: crate::Cursor
+/// [`Tree::new()`]: crate::Tree::new()
+/// [`builder`]: crate::node::Builder
+/// [creation]: crate::callbacks::Query
+/// [`Sync`]: std::marker::Sync
+/// [`Send`]: std::marker::Send
 pub struct Tree<Value, Error> {
     pub(crate) root: Link<Value, Error>,
 }
 
+/// # Safety
+///
+/// [`Tree`] contains no elements that would prevent it from being shared
+/// among multiple threads.
+///
+/// ---
+///
+/// See the [`tree`] documentation for more information.
+///
+/// [`tree`]: crate::Tree
+/// [`Tree`]: crate::Tree
 unsafe impl<Value, Error> Sync for Tree<Value, Error> {}
+
+/// # Safety
+///
+/// [`Tree`] can be safely sent between threads, since the borrow checked
+/// ensures that the cursor cannot outlive the tree from which it was created.
+///
+/// ---
+///
+/// See the [`tree`] documentation for more information.
+///
+/// [`tree`]: crate::Tree
+/// [`Tree`]: crate::Tree
 unsafe impl<Value, Error> Send for Tree<Value, Error> {}
 
 impl<Value, Error> Debug for Tree<Value, Error> {
@@ -78,22 +131,30 @@ impl<Value, Error> Debug for Tree<Value, Error> {
 }
 
 impl<'tree, Value, Error> Tree<Value, Error> {
-    /// # Creates a [`tree`] using [`link`] to the `root` [`node`]
+    /// # Creates a [`tree`] based on a `root` [`node`] [`builder`]
+    ///
+    /// See the [`tree`] documentation for more information.
     ///
     /// [`tree`]: crate::Tree
-    /// [`link`]: crate::node::Link
     /// [`node`]: crate::Node
-    pub fn new(root: impl Into<Link<Value, Error>>) -> Self {
-        Self { root: root.into() }
+    /// [`builder`]: crate::node::Builder
+    pub fn new(builder: impl Into<node::Builder<Value, Error>>) -> Self {
+        Self {
+            root: builder.into().build(),
+        }
     }
 
-    /// # Creates a [`cursor`] at the [`tree's`] `root` [`node`]
+    /// # Creates a [`cursor`] at the [`tree`] `root` [`node`]
     ///
-    /// The returned [`cursor`] is positioned at the [`tree's`] `root` [`node`]
-    /// and has [`path`] set to `[0]`.
+    /// The returned [`cursor`] is positioned at the `root` [`node`] with
+    /// [`path`] set to `[0]`.
+    ///
+    /// ---
+    ///
+    /// See the [`tree`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
-    /// [`tree's`]: crate::Tree
+    /// [`tree`]: crate::Tree
     /// [`node`]: crate::Node
     /// [`path`]: crate::Cursor::path()
     pub fn cursor(&'tree self) -> Result<Cursor<'tree, Value, Error>, Error> {
@@ -105,7 +166,7 @@ impl<Value, Error> Drop for Tree<Value, Error> {
     fn drop(&mut self) {
         drop_link(self.root);
 
-        #[cfg(feature = "debug")]
+        #[cfg(test)]
         {
             let remaining = NODES_ALIVE.load(Ordering::Acquire);
 

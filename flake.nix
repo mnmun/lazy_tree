@@ -23,7 +23,7 @@
           {
             profile,
           }:
-          "${pkgs.cargo}/bin/cargo test --features debug --profile=${profile} --frozen --offline";
+          "${pkgs.cargo}/bin/cargo test --profile=${profile} --frozen --offline";
 
         check =
           { profile }:
@@ -123,6 +123,7 @@
         devShell = pkgs.mkShell {
           packages = with pkgs; [
             cargo
+            cargo-sort
             cargo-deadlinks
             lazygit
           ];

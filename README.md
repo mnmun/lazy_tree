@@ -1,161 +1,390 @@
+# lazy_tree
+
+Makes it possible to traverse a `tree` of lazily-created `nodes` using `cursors` without having to create the entire `tree` structure in advance. `Nodes` are created automatically using callbacks when the `cursor` needs to access them and are deleted when they are no longer used.
+
+Used in [lazy_json](https://github.com/mnmun/lazy_json).
+
+## `Tree`
+
 ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 
-# A `tree` of lazily populated `nodes` with `cursor-based` traversal
+`Tree` is a wrapper aroung the `link` to the `root` `node` with the ability to create `cursors` for traversing hierarchical structure of lazily-created `nodes`. `Tree` may have multiple `cursors` at the same time, pointing to different `nodes` and moving independently of each other.
 
-Provides a `cursor-based` interface for traversing `trees` of lazily populated `nodes` without materializing the entire hierarchy in memory. The `nodes` are populated only when visited by `cursors` and remain available only while they are needed.
+## `Cursor`
 
-Each `node` has an internal counter that tracks how many `cursors` are visiting it. When a `cursor` descends to (visits) a `node`, its counter is incremented; when a `cursor` ascends from (leaves) the `node` - decremented. When a `cursor` visits a `node` whose current counter is zero, the `node's` `callback` is invoked. The resulting children remain available until the last `cursor` leaves the `node`, at which point the counter reaches zero and children are released.
+![](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
 
-A `cursor` can move in both axes through the `tree`:
+`Cursor` is a tool for traversing a `tree` of lazily-created `nodes`. It can move between `nodes` within the `tree` and provides access to the `value` stored in the `node` it currently points to. As it moves, the `cursor` triggers the creation of any `nodes` it need to access, as well as the deletion of `nodes` that are no longer in use.
 
- - Vertically, from a parent to one of its children or in the opposite direction;
- - Horizontally, to the next or previous sibling, including siblings in an adjacent branch.
+## Callbacks
 
-The following diagram shows the example `tree` in various states determined by the positions of the `cursor`, indicated by asterisks:
+![](https://github.com/mnmun/images/blob/main/telephone.png?raw=true)
 
-![](https://github.com/mnmun/lazy_tree/blob/main/diagrams/diagram_0.png?raw=true)
+Each `node` in the `tree` contains two callbacks, which are invoked automatically by the `cursor` as it moves through the `tree`:
 
-Consider a single `cursor` descending through the `tree` (`(0)` → `(3)`):
+- `Total` - invoked when the `cursor` moves to a `node`. It ensures the `Query` callback functions correctly by calculating the `total` number of child `nodes` for a given parent `node`. If this calculation has already been performed for this `node`, it is not repeated;
+- `Query` - invoked when the `cursor` moves downward to a child `node` that has not yet been created. It handles the creation of a new child `node` only when access to that `node` is actually required.
 
-- `(0)`: The `tree` has no `cursors`, and only the `ROOT` `node` is present;
-- `(1)`: A `cursor` is created at `ROOT`, and `ROOT's` children populated by a `callback`;
-- `(2)`: The `cursor` descends from `ROOT` to `A` and visits `A`. Because this is the first `cursor` to visit `A`, its children are populated by the `callback`. `ROOT` and its children remain available;
-- `(3)`: The `cursor` descends from `A` to `D` and visits `D`. Because this is the first `cursor` to visit `D`, its children are populated by the `callback`. `A` and its children remain available.
-
-Thus, a `cursor` moving downward leaves behind a path of populated `nodes` from the `tree's` `root` to its current position.
-
-Now consider the reverse traversal, in which the `cursor` ascends through the `tree` (`(3)` → `(0)`):
-
-- `(3)`: The `cursor` is at `D`, whose children are currently populated;
-- `(2)`: The `cursor` ascends from `D` to `A`; it leaves `D`, and its children are released because no other `cursor` keeps `D` visited;
-- `(1)`: The `cursor` ascends from `A` to `ROOT`; it leaves `A`, and its children are released because no other `cursor` keeps `A` visited;
-- `(0)`: The `cursor` is dropped, and all `nodes` except `ROOT` in the `tree` are released.
-
-In other words, `nodes` `populated` during traversal and released automatically once no `cursor` keeps them visited.
-
-## Types
-
-![](https://github.com/mnmun/images/blob/main/handle_with_care.png?raw=true)
-
-The crate provides the following main types:
-
- - `Tree` - owns the `root` `node` and creates `cursors`;
- - `Cursor` - traverses and inspects the `tree`;
- - `Node` - stores `value`, `link` to parent and `links` to currently populated children;
- - `Populate` - a function used to create a `node's` children when a `cursor` visits an unvisited `node`.
-
-## Generic parameters
-
-![](https://github.com/mnmun/images/blob/main/umbrella.png?raw=true)
-
-The following generic parameters are used in the types of this crate:
-
- - `Value` - the type of the `value` stored in each `node`;
- - `Error` - the type returned by the `callback` in the event of failure.
-
-## Safety
-
-![](https://github.com/mnmun/images/blob/main/slippery.png?raw=true)
-
-A `tree` can be shared between threads, and multiple `cursors` may traverse the same `tree` concurrently. Access to the `root` and to each `node's` traversal state is synchronized internally. Each `cursor` still borrows the `tree` for its entire lifetime and therefore cannot outlive the `tree` from which it was created.
+In this way, a developer can define the logic for constructing a `tree` of lazily-created `nodes` tailored to their specific use case by implementing these callbacks.
 
 ## Example
 
 ![](https://github.com/mnmun/images/blob/main/bulb.png?raw=true)
 
-The following example constructs a lazily populated binary `tree` from serialized data represented as `[ROOT, LEFT, RIGHT, LEFT-LEFT, LEFT-RIGHT, RIGHT-LEFT, RIGHT-RIGHT, ...]`:
+The following example constructs a lazily-created binary `tree` from serialized data represented as `[ROOT, LEFT, RIGHT, LEFT-LEFT, LEFT-RIGHT, RIGHT-LEFT, RIGHT-RIGHT, ...]`:
 
-![](https://github.com/mnmun/lazy_tree/blob/main/diagrams/diagram_1.png?raw=true)
+```plain
+                     ROOT                     
+          ┌───────────┴───────────┐           
+         LEFT                   RIGHT         
+    ┌─────┴─────┐           ┌─────┴─────┐     
+LEFT-LEFT   LEFT-RIGHT RIGHT-LEFT  RIGHT-RIGHT
+   ...         ...         ...         ...
+```
 
-Let the source data be represented by a slice of elements of type `Option<&str>`, where missing `nodes` are denoted by `None`.
+Let the source data be represented by a slice of elements of type `Option<&str>`, where missing `nodes` are denoted by `None`:
+
+```rust
+//                                    
+//                    ROOT            
+//            ┌────────┴────────┐     
+//           LEFT             RIGHT   
+//       ┌────┴────┐            │     
+//   LEFT-LEFT LEFT-RIGHT  RIGHT-RIGHT
+//       │                            
+// LEFT-LEFT-LEFT                     
+//                                    
+let source: &[Option<&str>] = &[
+    /* [0]          */ Some("ROOT"),
+    /* [0, 0]       */ Some("LEFT"),
+    /* [0, 1]       */ Some("RIGHT"),
+    /* [0, 0, 0]    */ Some("LEFT-LEFT"),
+    /* [0, 0, 1]    */ Some("LEFT-RIGHT"),
+    /* [0, 1, 0]    */ None, // RIGHT-LEFT
+    /* [0, 1, 1]    */ Some("RIGHT-RIGHT"),
+    /* [0, 0, 0, 0] */ Some("LEFT-LEFT-LEFT"),
+    /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
+];
+```
 
 The `value` stored in each `node` consists of the following fields:
 
- - `content` - a `&str` value associated with the `node`;
- - `source` - a reference to the source data;
- - `position` - an index within the source data used to determine the creation of child `nodes`.
+- `content` - the `&str` associated with the `node`;
+- `source` - a shared reference to the `source` data;
+- `left_child_index` - the index of an element in the `source` data that is associated with the left child `node` of this parent `node`.
 
-The `content` field is publicly accessible via the `content()` method, while the `source` and `position` fields are internal states utilized only within the `populate` `callback`.
-
-The `populate` `callback` creates two or fewer child `nodes` based on the `source` and the `position` of the parent `node`.
+The `content` field is publicly accessible via a `cursor` using the `Deref` trait, while the `source` and `left_child_index` fields are internal states utilized only within the `total` and `query` callbacks:
 
 ```rust
-use std::{borrow::Cow, ops::Range};
-use pretty_assertions::assert_eq;
-
-use lazy_tree::{
-  Tree,
-  Node,
-  node::Link,
-  cursor::{Direction, Target}
-};
-
 // `Value` stored in each node
 struct Bundle<'source> {
-    // Publicly accessible via the `content()` method
+    // Publicly accessible via the `Deref` trait
     content: &'source str,
 
     // Internal state
     source: &'source[Option<&'source str>],
-    position: usize,
+    left_child_index: usize,
 }
 
-impl<'source> Bundle<'source> {
-    pub fn content(&self) -> &'source str {
+// The `content` field can be accessed via cursor dereferencing: `**cursor`
+impl<'source> Deref for Bundle<'source> {
+    type Target = &'source str;
+
+    fn deref(&self) -> &Self::Target {
         &self.content
     }
 }
 
-// The error returned by the callback
+impl<'source> Bundle<'source> {
+    // Method for creating a new bundle
+    fn new(
+        content: &'source str,
+        source: &'source [Option<&'source str>],
+        left_child_index: usize,
+    ) -> Self {
+        Self {
+            content,
+            source,
+            left_child_index,
+        }
+    }
+}
+```
+
+We need to specify a type to be used for errors returned by the `total` and `query` callbacks. Since there are no scenarios in this simple example where these callbacks might fail, this type will not be actually used; it is included here solely for demonstration purposes:
+
+```rust
+// The errors returned by the callbacks
 #[derive(Debug)]
 enum MyError {
-    // Indicates that the source is empty
-    SourceIsEmpty,
+    TotalError,
+    QueryError,
+};
+```
+
+The `total` callback determines the `total` number of child `nodes` that this parent `node` can have:
+
+```rust
+fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+    // The callback can return an error if necessary:
+    // if condition {
+    //     return Err(MyError::TotalError);
+    // }
+
+    let mut total = 0;
+
+    if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
+        total += 1;
+    }
+
+    if let Some(Some(_)) = parent.source.get(parent.left_child_index + 1) {
+        total += 1;
+    }
+
+    Ok(total)
+}
+```
+
+The `query` callback creates a child `node` `builder` for the given `index` in the range `0..total`:
+
+```rust
+fn query<'source>(
+    parent: &Bundle<'source>,
+    index: usize,
+) -> Result<node::Builder<Bundle<'source>, MyError>, MyError> {
+    // The callback can return an error if necessary:
+    // if condition {
+    //     return Err(MyError::QueryError);
+    // }
+
+    let bundle = match (
+        parent
+            .source
+            .get(parent.left_child_index)
+            .cloned()
+            .flatten(),
+        parent
+            .source
+            .get(parent.left_child_index + 1)
+            .cloned()
+            .flatten(),
+    ) {
+        (Some(left), _) if index == 0 => Bundle::new(
+            left,
+            parent.source,
+            parent.left_child_index * 2 + 1,
+        ),
+        (None, Some(right)) if index == 0 => Bundle::new(
+            right,
+            parent.source,
+            (parent.left_child_index + 1) * 2 + 1,
+        ),
+        (Some(_), Some(right)) if index == 1 => Bundle::new(
+            right,
+            parent.source,
+            (parent.left_child_index + 1) * 2 + 1,
+        ),
+        _ => unreachable!(),
+    };
+
+    Ok(node::Builder::new(bundle, total, query))
+}
+```
+
+Simple function for creating a `tree`, with validation of the `source` data:
+
+```rust
+fn make_tree<'source>(
+    source: &'source [Option<&'source str>]
+) -> Tree<Bundle<'source>, MyError> {
+    if source.is_empty() {
+        panic!("Source is empty");
+    }
+
+    if source[0].is_none() {
+        panic!("Root is None");
+    }
+
+    Tree::new(node::Builder::new(
+        Bundle::new(source[0].unwrap(), source, 1),
+        total,
+        query,
+    ))
+}
+```
+
+And finally, the binary `tree` can be traversed using the `cursor`:
+
+```rust
+//                                    
+//                    ROOT            
+//            ┌────────┴────────┐     
+//           LEFT             RIGHT   
+//       ┌────┴────┐            │     
+//   LEFT-LEFT LEFT-RIGHT  RIGHT-RIGHT
+//       │                            
+// LEFT-LEFT-LEFT                     
+//                                    
+let source: &[Option<&str>] = &[
+    /* [0]          */ Some("ROOT"),
+    /* [0, 0]       */ Some("LEFT"),
+    /* [0, 1]       */ Some("RIGHT"),
+    /* [0, 0, 0]    */ Some("LEFT-LEFT"),
+    /* [0, 0, 1]    */ Some("LEFT-RIGHT"),
+    /* [0, 1, 0]    */ None, // RIGHT-LEFT
+    /* [0, 1, 1]    */ Some("RIGHT-RIGHT"),
+    /* [0, 0, 0, 0] */ Some("LEFT-LEFT-LEFT"),
+    /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
+];
+
+let tree = make_tree(source);
+
+let mut cursor = tree.cursor().unwrap();
+assert_eq!(cursor.path(), &[0]);
+assert_eq!(**cursor, "ROOT");
+
+cursor.walk(Direction::Down(Target::First));
+assert_eq!(cursor.path(), &[0, 0]);
+assert_eq!(**cursor, "LEFT");
+
+cursor.walk(Direction::Right);
+assert_eq!(cursor.path(), &[0, 1]);
+assert_eq!(**cursor, "RIGHT");
+
+cursor.walk(Direction::Down(Target::First));
+assert_eq!(cursor.path(), &[0, 1, 0]);
+assert_eq!(**cursor, "RIGHT-RIGHT");
+```
+
+The complete code:
+
+```rust
+use std::ops::Deref;
+use pretty_assertions::assert_eq;
+
+use lazy_tree::{
+    Tree,
+    node,
+    cursor::{Direction, Target}
 };
 
-// A type alias for `Link` with the type parameters specified
-type MyLink<'source> = Link<Bundle<'source>, MyError>;
+// `Value` stored in each node
+struct Bundle<'source> {
+    // Publicly accessible via the `Deref` trait
+    content: &'source str,
 
-// A type alias for a boxed slice of `MyLink`
-type Children<'source> = Box<[MyLink<'source>]>;
+    // Internal state
+    source: &'source[Option<&'source str>],
+    left_child_index: usize,
+}
 
-fn populate<'source>(
+// The `content` field can be accessed via cursor dereferencing: `**cursor`
+impl<'source> Deref for Bundle<'source> {
+    type Target = &'source str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.content
+    }
+}
+
+impl<'source> Bundle<'source> {
+    // Method for creating a new bundle
+    fn new(
+        content: &'source str,
+        source: &'source [Option<&'source str>],
+        left_child_index: usize,
+    ) -> Self {
+        Self {
+            content,
+            source,
+            left_child_index,
+        }
+    }
+}
+
+// The errors returned by the callbacks
+#[derive(Debug)]
+enum MyError {
+    TotalError,
+    QueryError,
+};
+
+fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+    // The callback can return an error if necessary:
+    // if condition {
+    //     return Err(MyError::TotalError);
+    // }
+
+    let mut total = 0;
+
+    if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
+        total += 1;
+    }
+
+    if let Some(Some(_)) = parent.source.get(parent.left_child_index + 1) {
+        total += 1;
+    }
+
+    Ok(total)
+}
+
+fn query<'source>(
     parent: &Bundle<'source>,
-) -> Result<Children<'source>, MyError> {
-    if parent.source.is_empty() {
-        return Err(MyError::SourceIsEmpty);
+    index: usize,
+) -> Result<node::Builder<Bundle<'source>, MyError>, MyError> {
+    // if condition {
+    //     return Err(MyError::QueryError);
+    // }
+
+    let bundle = match (
+        parent
+            .source
+            .get(parent.left_child_index)
+            .cloned()
+            .flatten(),
+        parent
+            .source
+            .get(parent.left_child_index + 1)
+            .cloned()
+            .flatten(),
+    ) {
+        (Some(left), _) if index == 0 => Bundle::new(
+            left,
+            parent.source,
+            parent.left_child_index * 2 + 1,
+        ),
+        (None, Some(right)) if index == 0 => Bundle::new(
+            right,
+            parent.source,
+            (parent.left_child_index + 1) * 2 + 1,
+        ),
+        (Some(_), Some(right)) if index == 1 => Bundle::new(
+            right,
+            parent.source,
+            (parent.left_child_index + 1) * 2 + 1,
+        ),
+        _ => unreachable!(),
+    };
+
+    Ok(node::Builder::new(bundle, total, query))
+}
+
+fn make_tree<'source>(
+    source: &'source [Option<&'source str>]
+) -> Tree<Bundle<'source>, MyError> {
+    if source.is_empty() {
+        panic!("Source is empty");
     }
 
-    if parent.position >= parent.source.len() {
-        return Ok(Box::default());
+    if source[0].is_none() {
+        panic!("Root is None");
     }
 
-    let left_child = parent.source.get(parent.position).cloned();
-    let right_child = parent.source.get(parent.position + 1).cloned();
-
-    let mut children = vec![];
-
-    if let Some(Some(value)) = left_child {
-        let bundle = Bundle {
-            content: value,
-            source: parent.source,
-            position: parent.position * 2 + 2,
-        };
-
-        children.push(Node::new(bundle, populate));
-    }
-
-    if let Some(Some(value)) = right_child {
-        let bundle = Bundle {
-            content: value,
-            source: parent.source,
-            position: (parent.position + 1) * 2 + 2,
-        };
-
-        children.push(Node::new(bundle, populate));
-    }
-
-    Ok(children.into_boxed_slice())
+    Tree::new(node::Builder::new(
+        Bundle::new(source[0].unwrap(), source, 1),
+        total,
+        query,
+    ))
 }
 
 //                                    
@@ -168,57 +397,35 @@ fn populate<'source>(
 // LEFT-LEFT-LEFT                     
 //                                    
 let source: &[Option<&str>] = &[
-    Some("ROOT"),
-    Some("LEFT"),
-    Some("RIGHT"),
-    Some("LEFT-LEFT"),
-    Some("LEFT-RIGHT"),
-    None, // RIGHT-LEFT
-    Some("RIGHT-RIGHT"),
-    Some("LEFT-LEFT-LEFT"),
-    None, // LEFT-LEFT-RIGHT
+    /* [0]          */ Some("ROOT"),
+    /* [0, 0]       */ Some("LEFT"),
+    /* [0, 1]       */ Some("RIGHT"),
+    /* [0, 0, 0]    */ Some("LEFT-LEFT"),
+    /* [0, 0, 1]    */ Some("LEFT-RIGHT"),
+    /* [0, 1, 0]    */ None, // RIGHT-LEFT
+    /* [0, 1, 1]    */ Some("RIGHT-RIGHT"),
+    /* [0, 0, 0, 0] */ Some("LEFT-LEFT-LEFT"),
+    /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
 ];
 
-let tree = Tree::new(
-    Node::new(
-        Bundle {
-            content: source[0].unwrap(),
-            source: &source[1..],
-            position: 0
-        },
-        populate
-    )
-);
+let tree = make_tree(source);
 
 let mut cursor = tree.cursor().unwrap();
 assert_eq!(cursor.path(), &[0]);
-assert_eq!(cursor.value().content(), "ROOT");
+assert_eq!(**cursor, "ROOT");
 
 cursor.walk(Direction::Down(Target::First));
 assert_eq!(cursor.path(), &[0, 0]);
-assert_eq!(cursor.value().content(), "LEFT");
+assert_eq!(**cursor, "LEFT");
 
 cursor.walk(Direction::Right);
 assert_eq!(cursor.path(), &[0, 1]);
-assert_eq!(cursor.value().content(), "RIGHT");
+assert_eq!(**cursor, "RIGHT");
 
 cursor.walk(Direction::Down(Target::First));
 assert_eq!(cursor.path(), &[0, 1, 0]);
-assert_eq!(cursor.value().content(), "RIGHT-RIGHT");
-```
-
-The [`lazy_json`](https://github.com/mnmun/lazy_json) crate includes a JSON parser built using this crate, which can serve as an usage example.
-
-## Features
-
-![](https://github.com/mnmun/images/blob/main/pot.png?raw=true)
-
-This crate provides a set of optional features that can be enabled in `Cargo.toml` file:
-
-- `debug` - Enables memory leak detection.
-  Each created `node` increments a global atomic counter. Dropping a `node` decrements the counter. If the counter is not zero when the `tree` is dropped, it indicates that some `nodes` were not deallocated, signaling a memory leak with a panic.
-  Note that `trees` share the same global `node` counter. If multiple `trees` exist simultaneously, dropping one `tree` while another has alive `nodes` will be flagged as a memory leak and cause a panic.
-  Use this feature in sequentually executed tests where only one `tree` exists at a time!
+assert_eq!(**cursor, "RIGHT-RIGHT");
+ ```
 
 ## License
 

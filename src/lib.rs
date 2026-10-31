@@ -1,110 +1,55 @@
+//! Makes it possible to traverse a [`tree`] of lazily-created [`nodes`] using
+//! [`cursors`] without having to create the entire [`tree`] structure in
+//! advance. [`Nodes`] are [created] automatically using [callbacks] when
+//! the [`cursor`] needs to access them and are deleted when they are no longer
+//! used.
+//!
+//! Used in [lazy_json].
+//!
+//! ## [`Tree`]
+//!
 //! ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 //!
-//! # A [`tree`] of lazily populated [`nodes`] with [`cursor-based`] traversal
+//! [`Tree`] is a wrapper aroung the [`link`] to the `root` [`node`] with the
+//! ability to create [`cursors`] for traversing hierarchical structure of
+//! lazily-created [`nodes`]. [`Tree`] may have multiple [`cursors`] at the
+//! same time, pointing to different [`nodes`] and moving independently of each
+//! other.
 //!
-//! Provides a [`cursor-based`] interface for traversing [`trees`] of lazily
-//! populated [`nodes`] without materializing the entire hierarchy in memory.
-//! The [`nodes`] are populated only when visited by [`cursors`] and remain
-//! available only while they are needed.
+//! ## [`Cursor`]
 //!
-//! Each [`node`] has an internal counter that tracks how many [`cursors`] are
-//! visiting it. When a [`cursor`] descends to (visits) a [`node`], its counter
-//! is incremented; when a [`cursor`] ascends from (leaves) the [`node`] -
-//! decremented. When a [`cursor`] visits a [`node`] whose current counter is
-//! zero, the [`node's`] [`callback`] is invoked. The resulting children remain
-//! available until the last [`cursor`] leaves the [`node`], at which point the
-//! counter reaches zero and children are released.
+//! ![](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
 //!
-//! A [`cursor`] can move in both axes through the [`tree`]:
+//! [`Cursor`] is a tool for traversing a [`tree`] of lazily-created [`nodes`].
+//! It can move between [`nodes`] within the [`tree`] and provides access to
+//! the `value` stored in the [`node`] it currently points to. As it moves, the
+//! [`cursor`] triggers the [creation] of any [`nodes`] it need to access, as
+//! well as the deletion of [`nodes`] that are no longer in use.
 //!
-//! - Vertically, from a parent to one of its children or in the opposite
-//!   direction;
-//! - Horizontally, to the next or previous sibling, including siblings in an
-//!   adjacent branch.
+//! ## [Callbacks]
 //!
-//! The following diagram shows the example [`tree`] in various states
-//! determined by the positions of the [`cursor`], indicated by asterisks:
+//! ![](https://github.com/mnmun/images/blob/main/telephone.png?raw=true)
 //!
-//! ```plain
-//!                                               ROOT
-//!                             ROOT            ┌──┼──┐
-//!             *ROOT*        ┌──┼──┐           A  B  C
-//!   ROOT     ┌──┼──┐       *A* B  C        ┌──┼──┐   
-//!            A  B  C     ┌──┼──┐          *D* E  F   
-//!   (0)                  D  E  F        ┌──┼──┐      
-//!              (1)                      G  H  I      
-//!                            (2)                     
-//!                                             (3)    
-//! ```
+//! Each [`node`] in the [`tree`] contains two [callbacks], which are invoked
+//! automatically by the [`cursor`] as it moves through the [`tree`]:
 //!
-//! Consider a single [`cursor`] descending through the [`tree`]
-//! (`(0)` → `(3)`):
+//! - [`Total`] - invoked when the [`cursor`] moves to a [`node`]. It ensures
+//!   the [`Query`] callback functions correctly by calculating the `total`
+//!   number of child [`nodes`] for a given parent [`node`]. If this calculation
+//!   has already been performed for this [`node`], it is not repeated;
+//! - [`Query`] - invoked when the [`cursor`] moves downward to a child [`node`]
+//!   that has not yet been created. It handles the creation of a new child
+//!   [`node`] only when access to that [`node`] is actually required.
 //!
-//! - `(0)`: The [`tree`] has no [`cursors`], and only the `ROOT` [`node`] is
-//!   present;
-//! - `(1)`: A [`cursor`] is created at `ROOT`, and `ROOT's` children populated
-//!   by a [`callback`];
-//! - `(2)`: The [`cursor`] descends from `ROOT` to `A` and visits `A`. Because
-//!   this is the first [`cursor`] to visit `A`, its children are populated by
-//!   the [`callback`]. `ROOT` and its children remain available;
-//! - `(3)`: The [`cursor`] descends from `A` to `D` and visits `D`. Because
-//!   this is the first [`cursor`] to visit `D`, its children are populated by
-//!   the [`callback`]. `A` and its children remain available.
-//!
-//! Thus, a [`cursor`] moving downward leaves behind a path of populated
-//! [`nodes`] from the [`tree's`] `root` to its current position.
-//!
-//! Now consider the reverse traversal, in which the [`cursor`] ascends through
-//! the [`tree`] (`(3)` → `(0)`):
-//!
-//! - `(3)`: The [`cursor`] is at `D`, whose children are currently populated;
-//! - `(2)`: The [`cursor`] ascends from `D` to `A`; it leaves `D`, and its
-//!   children are released because no other [`cursor`] keeps `D` visited;
-//! - `(1)`: The [`cursor`] ascends from `A` to `ROOT`; it leaves `A`, and its
-//!   children are released because no other [`cursor`] keeps `A` visited;
-//! - `(0)`: The [`cursor`] is dropped, and all [`nodes`] except `ROOT` in the
-//!   [`tree`] are released.
-//!
-//! In other words, [`nodes`] [`populated`] during traversal and released
-//! automatically once no [`cursor`] keeps them visited.
-//!
-//! ## Types
-//!
-//! ![](https://github.com/mnmun/images/blob/main/handle_with_care.png?raw=true)
-//!
-//! The crate provides the following main types:
-//!
-//! - [`Tree`] - owns the `root` [`node`] and creates [`cursors`];
-//! - [`Cursor`] - traverses and inspects the [`tree`];
-//! - [`Node`] - stores [`value`], [`link`] to parent and [`links`] to
-//!   currently populated children;
-//! - [`Populate`] - a function used to create a [`node's`] children when a
-//!   [`cursor`] visits an unvisited [`node`].
-//!
-//! ## Generic parameters
-//!
-//! ![](https://github.com/mnmun/images/blob/main/umbrella.png?raw=true)
-//!
-//! The following generic parameters are used in the types of this crate:
-//!
-//! - `Value` - the type of the [`value`] stored in each [`node`];
-//! - `Error` - the type returned by the [`callback`] in the event of failure.
-//!
-//! ## Safety
-//!
-//! ![](https://github.com/mnmun/images/blob/main/slippery.png?raw=true)
-//!
-//! A [`tree`] can be shared between threads, and multiple [`cursors`] may
-//! traverse the same [`tree`] concurrently. Access to the `root` and to each
-//! [`node's`] traversal state is synchronized internally. Each [`cursor`] still
-//! borrows the [`tree`] for its entire lifetime and therefore cannot outlive
-//! the [`tree`] from which it was created.
+//! In this way, a developer can define the logic for constructing a [`tree`] of
+//! lazily-created [`nodes`] tailored to their specific use case by implementing
+//! these [callbacks].
 //!
 //! ## Example
 //!
 //! ![](https://github.com/mnmun/images/blob/main/bulb.png?raw=true)
 //!
-//! The following example constructs a lazily populated binary [`tree`] from
+//! The following example constructs a lazily-created binary [`tree`] from
 //! serialized data represented as
 //! `[ROOT, LEFT, RIGHT, LEFT-LEFT, LEFT-RIGHT, RIGHT-LEFT, RIGHT-RIGHT, ...]`:
 //!
@@ -118,99 +63,528 @@
 //! ```
 //!
 //! Let the source data be represented by a slice of elements of type
-//! `Option<&str>`, where missing [`nodes`] are denoted by `None`.
-//!
-//! The [`value`] stored in each [`node`] consists of the following fields:
-//!
-//! - `content` - a `&str` value associated with the [`node`];
-//! - `source` - a reference to the source data;
-//! - `position` - an index within the source data used to determine the
-//!   creation of child [`nodes`].
-//!
-//! The `content` field is publicly accessible via the `content()` method, while
-//! the `source` and `position` fields are internal states utilized only within
-//! the `populate` [`callback`].
-//!
-//! The `populate` [`callback`] creates two or fewer child [`nodes`] based on
-//! the `source` and the `position` of the parent [`node`].
+//! `Option<&str>`, where missing [`nodes`] are denoted by `None`:
 //!
 //! ```rust
-//! use std::{borrow::Cow, ops::Range};
-//! use pretty_assertions::assert_eq;
+//! //                                    
+//! //                    ROOT            
+//! //            ┌────────┴────────┐     
+//! //           LEFT             RIGHT   
+//! //       ┌────┴────┐            │     
+//! //   LEFT-LEFT LEFT-RIGHT  RIGHT-RIGHT
+//! //       │                            
+//! // LEFT-LEFT-LEFT                     
+//! //                                    
+//! let source: &[Option<&str>] = &[
+//!     /* [0]          */ Some("ROOT"),
+//!     /* [0, 0]       */ Some("LEFT"),
+//!     /* [0, 1]       */ Some("RIGHT"),
+//!     /* [0, 0, 0]    */ Some("LEFT-LEFT"),
+//!     /* [0, 0, 1]    */ Some("LEFT-RIGHT"),
+//!     /* [0, 1, 0]    */ None, // RIGHT-LEFT
+//!     /* [0, 1, 1]    */ Some("RIGHT-RIGHT"),
+//!     /* [0, 0, 0, 0] */ Some("LEFT-LEFT-LEFT"),
+//!     /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
+//! ];
+//! ```
 //!
-//! use lazy_tree::{
-//!   Tree,
-//!   Node,
-//!   node::Link,
-//!   cursor::{Direction, Target}
-//! };
+//! The `value` stored in each [`node`] consists of the following fields:
 //!
+//! - `content` - the `&str` associated with the [`node`];
+//! - `source` - a shared reference to the `source` data;
+//! - `left_child_index` - the index of an element in the `source` data that is
+//!   associated with the left child [`node`] of this parent [`node`].
+//!
+//! The `content` field is publicly accessible via a [`cursor`] using the
+//! `Deref` trait, while the `source` and `left_child_index` fields are internal
+//! states utilized only within the `total` and `query` [callbacks]:
+//!
+//! ```rust
+//! # use std::ops::Deref;
 //! // `Value` stored in each node
 //! struct Bundle<'source> {
-//!     // Publicly accessible via the `content()` method
+//!     // Publicly accessible via the `Deref` trait
 //!     content: &'source str,
 //!
 //!     // Internal state
 //!     source: &'source[Option<&'source str>],
-//!     position: usize,
+//!     left_child_index: usize,
 //! }
 //!
-//! impl<'source> Bundle<'source> {
-//!     pub fn content(&self) -> &'source str {
+//! // The `content` field can be accessed via cursor dereferencing: `**cursor`
+//! impl<'source> Deref for Bundle<'source> {
+//!     type Target = &'source str;
+//!
+//!     fn deref(&self) -> &Self::Target {
 //!         &self.content
 //!     }
 //! }
 //!
-//! // The error returned by the callback
+//! impl<'source> Bundle<'source> {
+//!     // Method for creating a new bundle
+//!     fn new(
+//!         content: &'source str,
+//!         source: &'source [Option<&'source str>],
+//!         left_child_index: usize,
+//!     ) -> Self {
+//!         Self {
+//!             content,
+//!             source,
+//!             left_child_index,
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! We need to specify a type to be used for errors returned by the `total` and
+//! `query` [callbacks]. Since there are no scenarios in this simple example
+//! where these [callbacks] might fail, this type will not be actually used; it
+//! is included here solely for demonstration purposes:
+//!
+//! ```rust
+//! // The errors returned by the callbacks
 //! #[derive(Debug)]
 //! enum MyError {
-//!     // Indicates that the source is empty
-//!     SourceIsEmpty,
+//!     TotalError,
+//!     QueryError,
+//! };
+//! ```
+//!
+//! The `total` [callback](crate::callbacks::Total) determines the `total`
+//! number of child [`nodes`] that this parent [`node`] can have:
+//!
+//! ```rust
+//! # struct Bundle<'source> {
+//! #     content: &'source str,
+//! #     source: &'source[Option<&'source str>],
+//! #     left_child_index: usize,
+//! # }
+//! # #[derive(Debug)]
+//! # enum MyError {
+//! #     TotalError,
+//! #     QueryError,
+//! # };
+//! fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+//!     // The callback can return an error if necessary:
+//!     // if condition {
+//!     //     return Err(MyError::TotalError);
+//!     // }
+//!
+//!     let mut total = 0;
+//!
+//!     if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
+//!         total += 1;
+//!     }
+//!
+//!     if let Some(Some(_)) = parent.source.get(parent.left_child_index + 1) {
+//!         total += 1;
+//!     }
+//!
+//!     Ok(total)
+//! }
+//! ```
+//!
+//! The `query` [callback](crate::callbacks::Query) creates a child [`node`]
+//! [`builder`] for the given `index` in the range `0..total`:
+//!
+//! ```rust
+//! # use lazy_tree::node;
+//! # struct Bundle<'source> {
+//! #     content: &'source str,
+//! #     source: &'source[Option<&'source str>],
+//! #     left_child_index: usize,
+//! # }
+//! # impl<'source> Bundle<'source> {
+//! #     fn new(
+//! #         content: &'source str,
+//! #         source: &'source [Option<&'source str>],
+//! #         left_child_index: usize,
+//! #     ) -> Self {
+//! #         Self {
+//! #             content,
+//! #             source,
+//! #             left_child_index,
+//! #         }
+//! #     }
+//! # }
+//! # #[derive(Debug)]
+//! # enum MyError {
+//! #     TotalError,
+//! #     QueryError,
+//! # };
+//! # fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+//! #     Err(MyError::TotalError)
+//! # }
+//! fn query<'source>(
+//!     parent: &Bundle<'source>,
+//!     index: usize,
+//! ) -> Result<node::Builder<Bundle<'source>, MyError>, MyError> {
+//!     // The callback can return an error if necessary:
+//!     // if condition {
+//!     //     return Err(MyError::QueryError);
+//!     // }
+//!
+//!     let bundle = match (
+//!         parent
+//!             .source
+//!             .get(parent.left_child_index)
+//!             .cloned()
+//!             .flatten(),
+//!         parent
+//!             .source
+//!             .get(parent.left_child_index + 1)
+//!             .cloned()
+//!             .flatten(),
+//!     ) {
+//!         (Some(left), _) if index == 0 => Bundle::new(
+//!             left,
+//!             parent.source,
+//!             parent.left_child_index * 2 + 1,
+//!         ),
+//!         (None, Some(right)) if index == 0 => Bundle::new(
+//!             right,
+//!             parent.source,
+//!             (parent.left_child_index + 1) * 2 + 1,
+//!         ),
+//!         (Some(_), Some(right)) if index == 1 => Bundle::new(
+//!             right,
+//!             parent.source,
+//!             (parent.left_child_index + 1) * 2 + 1,
+//!         ),
+//!         _ => unreachable!(),
+//!     };
+//!
+//!     Ok(node::Builder::new(bundle, total, query))
+//! }
+//! ```
+//!
+//! Simple function for creating a [`tree`], with validation of the `source`
+//! data:
+//!
+//! ```rust
+//! # use lazy_tree::{
+//! #     Tree,
+//! #     node,
+//! # };
+//! # struct Bundle<'source> {
+//! #     content: &'source str,
+//! #     source: &'source[Option<&'source str>],
+//! #     left_child_index: usize,
+//! # }
+//! # impl<'source> Bundle<'source> {
+//! #     fn new(
+//! #         content: &'source str,
+//! #         source: &'source [Option<&'source str>],
+//! #         left_child_index: usize,
+//! #     ) -> Self {
+//! #         Self {
+//! #             content,
+//! #             source,
+//! #             left_child_index,
+//! #         }
+//! #     }
+//! # }
+//! # #[derive(Debug)]
+//! # enum MyError {
+//! #     TotalError,
+//! #     QueryError,
+//! # };
+//! # fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+//! #     Err(MyError::TotalError)
+//! # }
+//! # fn query<'source>(
+//! #     parent: &Bundle<'source>,
+//! #     index: usize,
+//! # ) -> Result<node::Builder<Bundle<'source>, MyError>, MyError> {
+//! #     Err(MyError::QueryError)
+//! # }
+//! fn make_tree<'source>(
+//!     source: &'source [Option<&'source str>]
+//! ) -> Tree<Bundle<'source>, MyError> {
+//!     if source.is_empty() {
+//!         panic!("Source is empty");
+//!     }
+//!
+//!     if source[0].is_none() {
+//!         panic!("Root is None");
+//!     }
+//!
+//!     Tree::new(node::Builder::new(
+//!         Bundle::new(source[0].unwrap(), source, 1),
+//!         total,
+//!         query,
+//!     ))
+//! }
+//! ```
+//!
+//! And finally, the binary [`tree`] can be traversed using the [`cursor`]:
+//!
+//! ```rust
+//! # use std::ops::Deref;
+//! # use pretty_assertions::assert_eq;
+//! # use lazy_tree::{
+//! #     Tree,
+//! #     node,
+//! #     cursor::{Direction, Target}
+//! # };
+//! # struct Bundle<'source> {
+//! #     content: &'source str,
+//! #     source: &'source[Option<&'source str>],
+//! #     left_child_index: usize,
+//! # }
+//! # impl<'source> Deref for Bundle<'source> {
+//! #     type Target = &'source str;
+//! #     fn deref(&self) -> &Self::Target {
+//! #         &self.content
+//! #     }
+//! # }
+//! # impl<'source> Bundle<'source> {
+//! #     fn new(
+//! #         content: &'source str,
+//! #         source: &'source [Option<&'source str>],
+//! #         left_child_index: usize,
+//! #     ) -> Self {
+//! #         Self {
+//! #             content,
+//! #             source,
+//! #             left_child_index,
+//! #         }
+//! #     }
+//! # }
+//! # #[derive(Debug)]
+//! # enum MyError {
+//! #     TotalError,
+//! #     QueryError,
+//! # };
+//! # fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+//! #     let mut total = 0;
+//! #     if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
+//! #         total += 1;
+//! #     }
+//! #     if let Some(Some(_)) = parent.source.get(parent.left_child_index + 1) {
+//! #         total += 1;
+//! #     }
+//! #     Ok(total)
+//! # }
+//! # fn query<'source>(
+//! #     parent: &Bundle<'source>,
+//! #     index: usize,
+//! # ) -> Result<node::Builder<Bundle<'source>, MyError>, MyError> {
+//! #     let bundle = match (
+//! #         parent
+//! #             .source
+//! #             .get(parent.left_child_index)
+//! #             .cloned()
+//! #             .flatten(),
+//! #         parent
+//! #             .source
+//! #             .get(parent.left_child_index + 1)
+//! #             .cloned()
+//! #             .flatten(),
+//! #     ) {
+//! #         (Some(left), _) if index == 0 => Bundle::new(
+//! #             left,
+//! #             parent.source,
+//! #             parent.left_child_index * 2 + 1,
+//! #         ),
+//! #         (None, Some(right)) if index == 0 => Bundle::new(
+//! #             right,
+//! #             parent.source,
+//! #             (parent.left_child_index + 1) * 2 + 1,
+//! #         ),
+//! #         (Some(_), Some(right)) if index == 1 => Bundle::new(
+//! #             right,
+//! #             parent.source,
+//! #             (parent.left_child_index + 1) * 2 + 1,
+//! #         ),
+//! #         _ => unreachable!(),
+//! #     };
+//! #     Ok(node::Builder::new(bundle, total, query))
+//! # }
+//! # fn make_tree<'source>(
+//! #     source: &'source [Option<&'source str>]
+//! # ) -> Tree<Bundle<'source>, MyError> {
+//! #     if source.is_empty() {
+//! #         panic!("Source is empty");
+//! #     }
+//! #     if source[0].is_none() {
+//! #         panic!("Root is None");
+//! #     }
+//! #     Tree::new(node::Builder::new(
+//! #         Bundle::new(source[0].unwrap(), source, 1),
+//! #         total,
+//! #         query,
+//! #     ))
+//! # }
+//! //                                    
+//! //                    ROOT            
+//! //            ┌────────┴────────┐     
+//! //           LEFT             RIGHT   
+//! //       ┌────┴────┐            │     
+//! //   LEFT-LEFT LEFT-RIGHT  RIGHT-RIGHT
+//! //       │                            
+//! // LEFT-LEFT-LEFT                     
+//! //                                    
+//! let source: &[Option<&str>] = &[
+//!     /* [0]          */ Some("ROOT"),
+//!     /* [0, 0]       */ Some("LEFT"),
+//!     /* [0, 1]       */ Some("RIGHT"),
+//!     /* [0, 0, 0]    */ Some("LEFT-LEFT"),
+//!     /* [0, 0, 1]    */ Some("LEFT-RIGHT"),
+//!     /* [0, 1, 0]    */ None, // RIGHT-LEFT
+//!     /* [0, 1, 1]    */ Some("RIGHT-RIGHT"),
+//!     /* [0, 0, 0, 0] */ Some("LEFT-LEFT-LEFT"),
+//!     /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
+//! ];
+//!
+//! let tree = make_tree(source);
+//!
+//! let mut cursor = tree.cursor().unwrap();
+//! assert_eq!(cursor.path(), &[0]);
+//! assert_eq!(**cursor, "ROOT");
+//!
+//! cursor.walk(Direction::Down(Target::First));
+//! assert_eq!(cursor.path(), &[0, 0]);
+//! assert_eq!(**cursor, "LEFT");
+//!
+//! cursor.walk(Direction::Right);
+//! assert_eq!(cursor.path(), &[0, 1]);
+//! assert_eq!(**cursor, "RIGHT");
+//!
+//! cursor.walk(Direction::Down(Target::First));
+//! assert_eq!(cursor.path(), &[0, 1, 0]);
+//! assert_eq!(**cursor, "RIGHT-RIGHT");
+//! ```
+//!
+//! The complete code:
+//!
+//! ```rust
+//! use std::ops::Deref;
+//! use pretty_assertions::assert_eq;
+//!
+//! use lazy_tree::{
+//!     Tree,
+//!     node,
+//!     cursor::{Direction, Target}
 //! };
 //!
-//! // A type alias for `Link` with the type parameters specified
-//! type MyLink<'source> = Link<Bundle<'source>, MyError>;
+//! // `Value` stored in each node
+//! struct Bundle<'source> {
+//!     // Publicly accessible via the `Deref` trait
+//!     content: &'source str,
 //!
-//! // A type alias for a boxed slice of `MyLink`
-//! type Children<'source> = Box<[MyLink<'source>]>;
+//!     // Internal state
+//!     source: &'source[Option<&'source str>],
+//!     left_child_index: usize,
+//! }
 //!
-//! fn populate<'source>(
+//! // The `content` field can be accessed via cursor dereferencing: `**cursor`
+//! impl<'source> Deref for Bundle<'source> {
+//!     type Target = &'source str;
+//!
+//!     fn deref(&self) -> &Self::Target {
+//!         &self.content
+//!     }
+//! }
+//!
+//! impl<'source> Bundle<'source> {
+//!     // Method for creating a new bundle
+//!     fn new(
+//!         content: &'source str,
+//!         source: &'source [Option<&'source str>],
+//!         left_child_index: usize,
+//!     ) -> Self {
+//!         Self {
+//!             content,
+//!             source,
+//!             left_child_index,
+//!         }
+//!     }
+//! }
+//!
+//! // The errors returned by the callbacks
+//! #[derive(Debug)]
+//! enum MyError {
+//!     TotalError,
+//!     QueryError,
+//! };
+//!
+//! fn total<'source>(parent: &Bundle<'source>) -> Result<usize, MyError> {
+//!     // The callback can return an error if necessary:
+//!     // if condition {
+//!     //     return Err(MyError::TotalError);
+//!     // }
+//!
+//!     let mut total = 0;
+//!
+//!     if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
+//!         total += 1;
+//!     }
+//!
+//!     if let Some(Some(_)) = parent.source.get(parent.left_child_index + 1) {
+//!         total += 1;
+//!     }
+//!
+//!     Ok(total)
+//! }
+//!
+//! fn query<'source>(
 //!     parent: &Bundle<'source>,
-//! ) -> Result<Children<'source>, MyError> {
-//!     if parent.source.is_empty() {
-//!         return Err(MyError::SourceIsEmpty);
+//!     index: usize,
+//! ) -> Result<node::Builder<Bundle<'source>, MyError>, MyError> {
+//!     // if condition {
+//!     //     return Err(MyError::QueryError);
+//!     // }
+//!
+//!     let bundle = match (
+//!         parent
+//!             .source
+//!             .get(parent.left_child_index)
+//!             .cloned()
+//!             .flatten(),
+//!         parent
+//!             .source
+//!             .get(parent.left_child_index + 1)
+//!             .cloned()
+//!             .flatten(),
+//!     ) {
+//!         (Some(left), _) if index == 0 => Bundle::new(
+//!             left,
+//!             parent.source,
+//!             parent.left_child_index * 2 + 1,
+//!         ),
+//!         (None, Some(right)) if index == 0 => Bundle::new(
+//!             right,
+//!             parent.source,
+//!             (parent.left_child_index + 1) * 2 + 1,
+//!         ),
+//!         (Some(_), Some(right)) if index == 1 => Bundle::new(
+//!             right,
+//!             parent.source,
+//!             (parent.left_child_index + 1) * 2 + 1,
+//!         ),
+//!         _ => unreachable!(),
+//!     };
+//!
+//!     Ok(node::Builder::new(bundle, total, query))
+//! }
+//!
+//! fn make_tree<'source>(
+//!     source: &'source [Option<&'source str>]
+//! ) -> Tree<Bundle<'source>, MyError> {
+//!     if source.is_empty() {
+//!         panic!("Source is empty");
 //!     }
 //!
-//!     if parent.position >= parent.source.len() {
-//!         return Ok(Box::default());
+//!     if source[0].is_none() {
+//!         panic!("Root is None");
 //!     }
 //!
-//!     let left_child = parent.source.get(parent.position).cloned();
-//!     let right_child = parent.source.get(parent.position + 1).cloned();
-//!
-//!     let mut children = vec![];
-//!
-//!     if let Some(Some(value)) = left_child {
-//!         let bundle = Bundle {
-//!             content: value,
-//!             source: parent.source,
-//!             position: parent.position * 2 + 2,
-//!         };
-//!
-//!         children.push(Node::new(bundle, populate));
-//!     }
-//!
-//!     if let Some(Some(value)) = right_child {
-//!         let bundle = Bundle {
-//!             content: value,
-//!             source: parent.source,
-//!             position: (parent.position + 1) * 2 + 2,
-//!         };
-//!
-//!         children.push(Node::new(bundle, populate));
-//!     }
-//!
-//!     Ok(children.into_boxed_slice())
+//!     Tree::new(node::Builder::new(
+//!         Bundle::new(source[0].unwrap(), source, 1),
+//!         total,
+//!         query,
+//!     ))
 //! }
 //!
 //! //                                    
@@ -223,53 +597,35 @@
 //! // LEFT-LEFT-LEFT                     
 //! //                                    
 //! let source: &[Option<&str>] = &[
-//!     Some("ROOT"),
-//!     Some("LEFT"),
-//!     Some("RIGHT"),
-//!     Some("LEFT-LEFT"),
-//!     Some("LEFT-RIGHT"),
-//!     None, // RIGHT-LEFT
-//!     Some("RIGHT-RIGHT"),
-//!     Some("LEFT-LEFT-LEFT"),
-//!     None, // LEFT-LEFT-RIGHT
+//!     /* [0]          */ Some("ROOT"),
+//!     /* [0, 0]       */ Some("LEFT"),
+//!     /* [0, 1]       */ Some("RIGHT"),
+//!     /* [0, 0, 0]    */ Some("LEFT-LEFT"),
+//!     /* [0, 0, 1]    */ Some("LEFT-RIGHT"),
+//!     /* [0, 1, 0]    */ None, // RIGHT-LEFT
+//!     /* [0, 1, 1]    */ Some("RIGHT-RIGHT"),
+//!     /* [0, 0, 0, 0] */ Some("LEFT-LEFT-LEFT"),
+//!     /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
 //! ];
 //!
-//! let tree = Tree::new(
-//!     Node::new(
-//!         Bundle {
-//!             content: source[0].unwrap(),
-//!             source: &source[1..],
-//!             position: 0
-//!         },
-//!         populate
-//!     )
-//! );
+//! let tree = make_tree(source);
 //!
 //! let mut cursor = tree.cursor().unwrap();
 //! assert_eq!(cursor.path(), &[0]);
-//! assert_eq!(cursor.value().content(), "ROOT");
+//! assert_eq!(**cursor, "ROOT");
 //!
 //! cursor.walk(Direction::Down(Target::First));
 //! assert_eq!(cursor.path(), &[0, 0]);
-//! assert_eq!(cursor.value().content(), "LEFT");
+//! assert_eq!(**cursor, "LEFT");
 //!
 //! cursor.walk(Direction::Right);
 //! assert_eq!(cursor.path(), &[0, 1]);
-//! assert_eq!(cursor.value().content(), "RIGHT");
+//! assert_eq!(**cursor, "RIGHT");
 //!
 //! cursor.walk(Direction::Down(Target::First));
 //! assert_eq!(cursor.path(), &[0, 1, 0]);
-//! assert_eq!(cursor.value().content(), "RIGHT-RIGHT");
+//! assert_eq!(**cursor, "RIGHT-RIGHT");
 //! ```
-//!
-//! The [`lazy_json`] crate includes a JSON parser built using this crate, which
-//! can serve as an usage example.
-//!
-//! ## Features
-//!
-//! ![](https://github.com/mnmun/images/blob/main/pot.png?raw=true)
-//!
-#![doc = document_features::document_features!()]
 //!
 //! ## License
 //!
@@ -279,18 +635,20 @@
 //! [`tree's`]: crate::Tree
 //! [`trees`]: crate::Tree
 //! [`node`]: crate::Node
-//! [`nodes`]: crate::Node
 //! [`node's`]: crate::Node
+//! [`nodes`]: crate::Node
+//! [`builder`]: crate::node::Builder
 //! [`link`]: crate::node::Link
 //! [`links`]: crate::node::Link
 //! [`cursor`]: crate::Cursor
-//! [`cursor-based`]: crate::Cursor
 //! [`cursors`]: crate::Cursor
-//! [`callback`]: crate::node::Callback
-//! [`populated`]: crate::node::Callback
-//! [`Populate`]: crate::node::Callback
-//! [`value`]: crate::Node::value()
-//! [`lazy_json`]: https://github.com/mnmun/lazy_json
+//! [callbacks]: crate::callbacks
+//! [Callbacks]: crate::callbacks
+//! [`Total`]: crate::callbacks::Total
+//! [`Query`]: crate::callbacks::Query
+//! [creation]: crate::callbacks::Query
+//! [created]: crate::callbacks::Query
+//! [lazy_json]: https://github.com/mnmun/lazy_json
 
 #![allow(dead_code)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -302,6 +660,7 @@
 #![deny(rustdoc::unescaped_backticks)]
 #![deny(rustdoc::redundant_explicit_links)]
 
+pub mod callbacks;
 pub mod cursor;
 pub mod node;
 pub mod tree;
@@ -313,123 +672,130 @@ pub use tree::Tree;
 #[cfg(test)]
 mod tests {
 
-    use std::{borrow::Cow, ops::Range, thread};
+    use std::{ops::Deref, thread};
 
     use pretty_assertions::assert_eq;
     use serial_test::serial;
 
     use crate::{
-        Cursor, Node, Tree,
+        Node, Tree,
         cursor::{Direction, Target},
-        node::Link,
+        node,
     };
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Bundle<'source> {
         content: &'source str,
-        range: Option<Range<usize>>,
+
         source: &'source [Option<&'source str>],
+        left_child_index: usize,
+    }
+
+    impl<'source> Deref for Bundle<'source> {
+        type Target = &'source str;
+
+        fn deref(&self) -> &Self::Target {
+            &self.content
+        }
     }
 
     impl<'source> Bundle<'source> {
         fn new(
             content: &'source str,
-            range: impl Into<Option<Range<usize>>>,
+            left_child_index: usize,
             source: &'source [Option<&'source str>],
         ) -> Self {
-            let range = range.into();
             Self {
                 content,
-                range,
+                left_child_index,
                 source,
             }
         }
-
-        fn owned(
-            content: &'source str,
-            range: impl Into<Option<Range<usize>>>,
-            source: &'source [Option<&'source str>],
-        ) -> Cow<'source, Self> {
-            Cow::Owned(Self::new(content, range, source))
-        }
     }
-
-    // type MyValue = str;
-    // type MySource<'source> = Option<&'source str>;
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum MyError {
-        SourceIsEmpty,
-        RootIsNone,
-    }
-
-    type MyLink<'source> = Link<Bundle<'source>, MyError>;
-    type Children<'source> = Box<[MyLink<'source>]>;
 
     fn binary_tree<'source>(
         source: &'source [Option<&'source str>],
-    ) -> Tree<Bundle<'source>, MyError> {
-        fn populate<'source>(
-            // source: impl Into<Cow<'source, [MySource<'source>]>>,
-            parent: &Bundle<'source>,
-        ) -> Result<Children<'source>, MyError> {
-            let range = if let Some(range) = &parent.range {
-                range
-            } else {
-                return Ok(Box::default());
-            };
+    ) -> Tree<Bundle<'source>, ()> {
+        fn total<'source>(parent: &Bundle<'source>) -> Result<usize, ()> {
+            let mut total = 0;
 
-            // let source = source.into();
-            let source = parent.source;
-
-            let left_child = source.get(range.start).cloned();
-            let right_child = source.get(range.start + 1).cloned();
-
-            let mut children = vec![];
-
-            if let Some(Some(content)) = left_child {
-                children.push(Node::new(
-                    Bundle::new(
-                        content,
-                        {
-                            let start = range.start * 2 + 2;
-                            if source.len() < start {
-                                None
-                            } else {
-                                Some(start..source.len())
-                            }
-                        },
-                        source,
-                    ),
-                    populate,
-                ));
+            if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
+                total += 1;
             }
 
-            if let Some(Some(value)) = right_child {
-                children.push(Node::new(
-                    Bundle::new(
-                        value,
-                        {
-                            let start = (range.start + 1) * 2 + 2;
-                            if source.len() < start {
-                                None
-                            } else {
-                                Some(start..source.len())
-                            }
-                        },
-                        source,
-                    ),
-                    populate,
-                ));
+            if let Some(Some(_)) =
+                parent.source.get(parent.left_child_index + 1)
+            {
+                total += 1;
             }
 
-            Ok(children.into_boxed_slice())
+            Ok(total)
         }
 
-        Tree::new(Node::new(
-            Bundle::new("ROOT", 0..source.len(), source),
-            populate,
+        fn query<'source>(
+            parent: &Bundle<'source>,
+            index: usize,
+        ) -> Result<node::Builder<Bundle<'source>, ()>, ()> {
+            let bundle = match (
+                parent
+                    .source
+                    .get(parent.left_child_index)
+                    .cloned()
+                    .flatten(),
+                parent
+                    .source
+                    .get(parent.left_child_index + 1)
+                    .cloned()
+                    .flatten(),
+            ) {
+                (Some(left), _) if index == 0 => Bundle::new(
+                    left,
+                    parent.left_child_index * 2 + 1,
+                    parent.source,
+                ),
+                (None, Some(right)) if index == 0 => Bundle::new(
+                    right,
+                    (parent.left_child_index + 1) * 2 + 1,
+                    parent.source,
+                ),
+                (Some(_), Some(right)) if index == 1 => Bundle::new(
+                    right,
+                    (parent.left_child_index + 1) * 2 + 1,
+                    parent.source,
+                ),
+                _ => unreachable!(),
+            };
+
+            Ok(node::Builder::new(bundle, total, query))
+        }
+
+        if source.is_empty() {
+            panic!("Source is empty");
+        }
+
+        if source[0].is_none() {
+            panic!("Root is None");
+        }
+
+        Tree::new(node::Builder::new(
+            Bundle::new(source[0].unwrap(), 1, source),
+            total,
+            query,
         ))
+    }
+
+    macro_rules! assert_children {
+        ($left:expr, $right:expr) => {{
+            let left = $left;
+            let right = $right;
+
+            assert_eq!(left.len(), right.len());
+            left.values().zip(right.iter()).for_each(
+                |(left, right): (&&Node<Bundle<'_>, ()>, &&str)| {
+                    assert_eq!(&left.value.content, right);
+                },
+            );
+        }};
     }
 
     /// ```plain
@@ -442,6 +808,7 @@ mod tests {
     ///    LRL RLL
     /// ```
     const BINARY_0: &[Option<&str>] = &[
+        /* [0]          */ Some("ROOT"),
         /* [0, 0]       */ Some("L"),
         /* [0, 1]       */ Some("R"),
         /* [0, 0, 0]    */ Some("LL"),
@@ -458,141 +825,6 @@ mod tests {
         /* [0, 1, 1, 1] */ None, // RRR
     ];
 
-    fn binary_0_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L", "R"]
-        );
-    }
-
-    fn binary_0_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "L");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LL", "LR"]
-        );
-    }
-
-    fn binary_0_assert_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "R");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["RL", "RR",]
-        );
-    }
-
-    fn binary_0_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_0_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LRL"]
-        );
-    }
-
-    fn binary_0_assert_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["RLL" /*, "RLR" */]
-        );
-    }
-
-    fn binary_0_assert_0_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_0_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_0_assert_0_1_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     /// ```plain
     ///  ROOT
     ///   │
@@ -603,6 +835,7 @@ mod tests {
     ///    LRL
     /// ```
     const BINARY_1: &[Option<&str>] = &[
+        /* [0]          */ Some("ROOT"),
         /* [0, 0]       */ Some("L"),
         /* [0, 1]       */ None, // R
         /* [0, 0, 0]    */ Some("LL"),
@@ -619,66 +852,6 @@ mod tests {
         /* [0, 1, 1, 1] */ None, // RRR
     ];
 
-    fn binary_1_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L"]
-        );
-    }
-
-    fn binary_1_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_1_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LRL"]
-        );
-    }
-
-    fn binary_1_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     /// ```plain
     ///   ROOT
     ///    │
@@ -689,6 +862,7 @@ mod tests {
     /// LLL
     /// ```
     const BINARY_2: &[Option<&str>] = &[
+        /* [0]          */ Some("ROOT"),
         /* [0, 0]       */ Some("L"),
         /* [0, 1]       */ None, // R
         /* [0, 0, 0]    */ Some("LL"),
@@ -705,81 +879,6 @@ mod tests {
         /* [0, 1, 1, 1] */ None, // RRR
     ];
 
-    fn binary_2_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L"]
-        );
-    }
-
-    fn binary_2_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "L");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LL", "LR"]
-        );
-    }
-
-    fn binary_2_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLL"]
-        );
-    }
-
-    fn binary_2_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_2_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     /// ```plain
     ///   ROOT
     ///    │
@@ -792,6 +891,7 @@ mod tests {
     /// LLLL
     /// ```
     const BINARY_3: &[Option<&str>] = &[
+        /* [0]             */ Some("ROOT"),
         /* [0, 0]          */ Some("L"),
         /* [0, 1]          */ None, // R
         /* [0, 0, 0]       */ Some("LL"),
@@ -810,111 +910,6 @@ mod tests {
         /* [0, 0, 0, 0, 1] */ None, // LLLR
     ];
 
-    fn binary_3_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L"]
-        );
-    }
-
-    fn binary_3_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "L");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LL", "LR"]
-        );
-    }
-
-    fn binary_3_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLL"]
-        );
-    }
-
-    fn binary_3_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LRL"]
-        );
-    }
-
-    fn binary_3_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLLL"]
-        );
-    }
-
-    fn binary_3_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_3_assert_0_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     /// ```plain
     ///   ROOT
     ///    │
@@ -927,6 +922,7 @@ mod tests {
     ///     LRLL
     /// ```
     const BINARY_4: &[Option<&str>] = &[
+        /* [0]             */ Some("ROOT"),
         /* [0, 0]          */ Some("L"),
         /* [0, 1]          */ None, // R
         /* [0, 0, 0]       */ Some("LL"),
@@ -949,111 +945,6 @@ mod tests {
         /* [0, 0, 1, 0, 1] */ None, // LRLR
     ];
 
-    fn binary_4_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L"]
-        );
-    }
-
-    fn binary_4_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "L");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LL", "LR"]
-        );
-    }
-
-    fn binary_4_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLL"]
-        );
-    }
-
-    fn binary_4_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LRL"]
-        );
-    }
-
-    fn binary_4_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_4_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LRLL"]
-        );
-    }
-
-    fn binary_4_assert_0_0_1_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     /// ```plain
     /// ROOT
     ///  │
@@ -1066,6 +957,7 @@ mod tests {
     /// LLLL
     /// ```
     const LIST: &[Option<&str>] = &[
+        /* [0]             */ Some("ROOT"),
         /* [0, 0]          */ Some("L"),
         /* [0, 1]          */ None, // R
         /* [0, 0, 0]       */ Some("LL"),
@@ -1084,100 +976,10 @@ mod tests {
         /* [0, 0, 0, 0, 1] */ None, // LLLR
     ];
 
-    fn list_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L"]
-        );
-    }
-
-    fn list_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "L");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LL"]
-        );
-    }
-
-    fn list_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLL"]
-        );
-    }
-
-    fn list_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLLL"]
-        );
-    }
-
-    fn list_assert_0_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     /// ```plain
     /// ROOT
     /// ```
-    const EMPTY: &[Option<&str>] = &[None, None];
-
-    fn empty_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
+    const EMPTY: &[Option<&str>] = &[Some("ROOT"), None, None];
 
     /// ```plain
     ///               ROOT
@@ -1189,6 +991,7 @@ mod tests {
     /// LLL LLR LRL LRR RLL RLR RRL RRR
     /// ```
     const BINARY_FULL: &[Option<&str>] = &[
+        /* [0]          */ Some("ROOT"),
         /* [0, 0]       */ Some("L"),
         /* [0, 1]       */ Some("R"),
         /* [0, 0, 0]    */ Some("LL"),
@@ -1205,262 +1008,55 @@ mod tests {
         /* [0, 1, 1, 1] */ Some("RRR"),
     ];
 
-    fn binary_full_assert_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "ROOT");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["L", "R"]
-        );
-    }
-
-    fn binary_full_assert_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "L");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LL", "LR"]
-        );
-    }
-
-    fn binary_full_assert_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "R");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["RL", "RR",]
-        );
-    }
-
-    fn binary_full_assert_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LLL", "LLR"]
-        );
-    }
-
-    fn binary_full_assert_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["LRL", "LRR"]
-        );
-    }
-
-    fn binary_full_assert_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["RLL", "RLR"]
-        );
-    }
-
-    fn binary_full_assert_0_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            ["RRL", "RRR"]
-        );
-    }
-
-    fn binary_full_assert_0_0_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_0_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LLR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_0_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_0_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 0, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "LRR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_1_0_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RLL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_1_0_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 0, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RLR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_1_1_0<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 1, 0]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RRL");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
-    fn binary_full_assert_0_1_1_1<'tree, 'source>(
-        cursor: &Cursor<'tree, Bundle<'source>, MyError>,
-    ) {
-        assert_eq!(cursor.path(), &[0, 1, 1, 1]);
-        assert_eq!(Node::from_link(cursor.link).value().content, "RRR");
-        assert_eq!(
-            *cursor
-                .children()
-                .iter()
-                .map(|child| child.value().content)
-                .collect::<Vec<_>>(),
-            Vec::<&str>::default()
-        );
-    }
-
     #[test]
     #[serial]
     /// Uses [`BINARY_0`]
     fn go_to() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1]).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1]).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0]).unwrap());
-        binary_0_assert_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0]);
+        assert_eq!(**cursor, "RL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 1]).unwrap());
-        binary_0_assert_0_1_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 1]);
+        assert_eq!(**cursor, "RR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_0_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.go_to(&[0, 0, 0, 0, 0, 0, 0]).unwrap());
     }
@@ -1471,22 +1067,34 @@ mod tests {
     fn wrong_go_to() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.go_to(&[0, 0, 2]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.go_to(&[0, 1, 2]).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.go_to(&[0, 3, 0]).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.go_to(&[3, 0, 0]).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1497,10 +1105,14 @@ mod tests {
     fn jump_up_from_root() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Up).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1511,13 +1123,19 @@ mod tests {
     fn jump_up() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Up).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1526,10 +1144,14 @@ mod tests {
     fn jump_up_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Up).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1540,27 +1162,49 @@ mod tests {
     fn jump_down_from_leaf() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::First)).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::Last)).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::Index(0))).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::Index(2))).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1574,27 +1218,49 @@ mod tests {
     fn jump_down() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::First)).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::Last)).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::Index(1))).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.jump(Direction::Down(Target::Index(2))).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1603,19 +1269,29 @@ mod tests {
     fn jump_down_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Down(Target::First)).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Down(Target::Last)).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Down(Target::Index(0))).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Down(Target::Index(2))).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1626,10 +1302,14 @@ mod tests {
     fn walk_up_from_root() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Up).unwrap());
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1640,13 +1320,19 @@ mod tests {
     fn walk_up() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.walk(Direction::Up).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1655,10 +1341,14 @@ mod tests {
     fn walk_up_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Up).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1669,13 +1359,19 @@ mod tests {
     fn walk_down_from_leaf() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Down(Target::First)).unwrap());
-        binary_0_assert_0_1_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0, 0]);
+        assert_eq!(**cursor, "RLL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1689,27 +1385,49 @@ mod tests {
     fn walk_down() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.walk(Direction::Down(Target::First)).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.walk(Direction::Down(Target::Last)).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(cursor.walk(Direction::Down(Target::Index(1))).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+
         assert!(!cursor.walk(Direction::Down(Target::Index(2))).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1718,19 +1436,29 @@ mod tests {
     fn walk_down_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Down(Target::First)).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Down(Target::Last)).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Down(Target::Index(0))).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Down(Target::Index(2))).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1741,13 +1469,19 @@ mod tests {
     fn jump_left_across_tree_different_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_0_assert_0_1_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 1]);
+        assert_eq!(**cursor, "RR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1758,13 +1492,19 @@ mod tests {
     fn jump_left_across_tree_same_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1775,13 +1515,19 @@ mod tests {
     fn jump_left_across_tree_to_shorter_branch() {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().unwrap();
-        binary_2_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).unwrap());
-        binary_2_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_2_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1793,13 +1539,19 @@ mod tests {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().unwrap();
 
-        binary_1_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_1_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_1_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1810,13 +1562,19 @@ mod tests {
     fn jump_left_in_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1]).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1827,13 +1585,19 @@ mod tests {
     fn jump_left_between_branches_to_shorter_branch() {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().unwrap();
-        binary_1_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_1_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_1_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1844,13 +1608,19 @@ mod tests {
     fn jump_left_between_branches_to_longer_branch() {
         let tree = binary_tree(BINARY_3);
         let mut cursor = tree.cursor().unwrap();
-        binary_3_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_3_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_3_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1861,13 +1631,19 @@ mod tests {
     fn jump_left_between_branches_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0]).unwrap());
-        binary_0_assert_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0]);
+        assert_eq!(**cursor, "RL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1876,13 +1652,19 @@ mod tests {
     fn jump_left_in_list() {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().unwrap();
-        list_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1891,10 +1673,14 @@ mod tests {
     fn jump_left_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Left).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1905,13 +1691,19 @@ mod tests {
     fn jump_right_across_tree_different_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 1]).unwrap());
-        binary_0_assert_0_1_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 1]);
+        assert_eq!(**cursor, "RR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1922,13 +1714,19 @@ mod tests {
     fn jump_right_across_tree_same_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1]).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1939,13 +1737,19 @@ mod tests {
     fn jump_right_across_tree_to_shorter_branch() {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().unwrap();
-        binary_1_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_1_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_1_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1956,13 +1760,19 @@ mod tests {
     fn jump_right_across_tree_to_longer_branch() {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().unwrap();
-        binary_2_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1]).unwrap());
-        binary_2_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_2_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1973,13 +1783,19 @@ mod tests {
     fn jump_right_in_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -1990,13 +1806,19 @@ mod tests {
     fn jump_right_between_branches_to_shorter_branch() {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().unwrap();
-        binary_2_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).unwrap());
-        binary_2_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_2_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2007,13 +1829,19 @@ mod tests {
     fn jump_right_between_branches_to_longer_branch() {
         let tree = binary_tree(BINARY_4);
         let mut cursor = tree.cursor().unwrap();
-        binary_4_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).unwrap());
-        binary_4_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_4_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2024,13 +1852,19 @@ mod tests {
     fn jump_right_between_branches_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1]).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        binary_0_assert_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0]);
+        assert_eq!(**cursor, "RL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2039,13 +1873,19 @@ mod tests {
     fn jump_right_in_list() {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().unwrap();
-        list_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2054,10 +1894,14 @@ mod tests {
     fn jump_right_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.jump(Direction::Right).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2068,13 +1912,19 @@ mod tests {
     fn walk_left_across_tree_different_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_0_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2085,13 +1935,19 @@ mod tests {
     fn walk_left_across_tree_same_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2102,13 +1958,19 @@ mod tests {
     fn walk_left_across_tree_to_shorter_branch() {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().unwrap();
-        binary_2_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).unwrap());
-        binary_2_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_2_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2120,13 +1982,19 @@ mod tests {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().unwrap();
 
-        binary_1_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        binary_1_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_1_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2137,13 +2005,19 @@ mod tests {
     fn walk_left_in_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1]).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.walk(Direction::Left).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2154,13 +2028,19 @@ mod tests {
     fn walk_left_between_branches_to_shorter_branch() {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().unwrap();
-        binary_1_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_1_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_1_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2171,13 +2051,19 @@ mod tests {
     fn walk_left_between_branches_to_longer_branch() {
         let tree = binary_tree(BINARY_3);
         let mut cursor = tree.cursor().unwrap();
-        binary_3_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_3_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_3_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2188,13 +2074,19 @@ mod tests {
     fn walk_left_between_branches_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 0]).unwrap());
-        binary_0_assert_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0]);
+        assert_eq!(**cursor, "RL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        binary_0_assert_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 0]);
+        assert_eq!(**cursor, "RL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2203,13 +2095,19 @@ mod tests {
     fn walk_left_in_list() {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().unwrap();
-        list_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2218,10 +2116,14 @@ mod tests {
     fn walk_left_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Left).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2232,13 +2134,19 @@ mod tests {
     fn walk_right_across_tree_different_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1, 1]).unwrap());
-        binary_0_assert_0_1_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 1]);
+        assert_eq!(**cursor, "RR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_0_assert_0_1_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1, 1]);
+        assert_eq!(**cursor, "RR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2249,13 +2157,19 @@ mod tests {
     fn walk_right_across_tree_same_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 1]).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2266,13 +2180,19 @@ mod tests {
     fn walk_right_across_tree_to_shorter_branch() {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().unwrap();
-        binary_1_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).unwrap());
-        binary_1_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_1_assert_0_0_1_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1, 0]);
+        assert_eq!(**cursor, "LRL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2283,13 +2203,19 @@ mod tests {
     fn walk_right_across_tree_to_longer_branch() {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().unwrap();
-        binary_2_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1]).unwrap());
-        binary_2_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_2_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2300,13 +2226,19 @@ mod tests {
     fn walk_right_in_branch_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0]).unwrap());
-        binary_0_assert_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.walk(Direction::Right).unwrap());
-        binary_0_assert_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 1]);
+        assert_eq!(**cursor, "R");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2317,13 +2249,19 @@ mod tests {
     fn walk_right_between_branches_to_shorter_branch() {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().unwrap();
-        binary_2_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).unwrap());
-        binary_2_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_2_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2334,13 +2272,19 @@ mod tests {
     fn walk_right_between_branches_to_longer_branch() {
         let tree = binary_tree(BINARY_4);
         let mut cursor = tree.cursor().unwrap();
-        binary_4_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).unwrap());
-        binary_4_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_4_assert_0_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0, 0]);
+        assert_eq!(**cursor, "LLL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2351,13 +2295,19 @@ mod tests {
     fn walk_right_between_branches_same_depth() {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().unwrap();
-        binary_0_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 1]).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        binary_0_assert_0_0_1(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 1]);
+        assert_eq!(**cursor, "LR");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2366,13 +2316,19 @@ mod tests {
     fn walk_right_in_list() {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().unwrap();
-        list_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(cursor.go_to(&[0, 0, 0]).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        list_assert_0_0_0(&cursor);
+        assert_eq!(cursor.path(), &[0, 0, 0]);
+        assert_eq!(**cursor, "LL");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2381,10 +2337,14 @@ mod tests {
     fn walk_right_in_empty_tree() {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().unwrap();
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
 
         assert!(!cursor.walk(Direction::Right).unwrap());
-        empty_assert_0(&cursor);
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
     }
 
     #[test]
@@ -2394,31 +2354,29 @@ mod tests {
         let tree = binary_tree(BINARY_FULL);
         let mut cursor = tree.cursor().unwrap();
 
-        binary_full_assert_0(&cursor);
-        assert_eq!(*cursor.visitors.lock().unwrap(), 1);
-        unsafe { assert!(!(&*cursor.children.get()).is_empty()) }
-        unsafe {
-            let root = Node::from_link(tree.root);
-            assert_eq!(*root.visitors.lock().unwrap(), 1);
-            assert!(!(&*root.children.get()).is_empty());
-        };
+        assert_eq!(cursor.path(), &[0]);
+        assert_eq!(**cursor, "ROOT");
+        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(unsafe { *cursor.link.as_ref().in_use() }, 1);
+        assert!(unsafe { cursor.link.as_ref().children().is_empty() });
+        let root = Node::from_link(tree.root);
+        assert_eq!(*root.in_use(), 1);
+        assert!(root.children().is_empty());
 
         assert!(cursor.walk(Direction::Down(Target::First)).unwrap());
-        binary_full_assert_0_0(&cursor);
-        assert_eq!(*cursor.visitors.lock().unwrap(), 1);
-        unsafe { assert!(!(&*cursor.children.get()).is_empty()) }
-        unsafe {
-            let root = Node::from_link(tree.root);
-            assert_eq!(*root.visitors.lock().unwrap(), 1);
-            assert!(!(&*root.children.get()).is_empty());
-        };
+        assert_eq!(cursor.path(), &[0, 0]);
+        assert_eq!(**cursor, "L");
+        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(unsafe { *cursor.link.as_ref().in_use() }, 1);
+        assert!(unsafe { cursor.link.as_ref().children().is_empty() });
+        let root = Node::from_link(tree.root);
+        assert_eq!(*root.in_use(), 1);
+        assert!(!root.children().is_empty());
 
         drop(cursor);
-        unsafe {
-            let root = Node::from_link(tree.root);
-            assert_eq!(*root.visitors.lock().unwrap(), 0);
-            assert!((&*root.children.get()).is_empty());
-        };
+        let root = Node::from_link(tree.root);
+        assert_eq!(*root.in_use(), 0);
+        assert!(root.children().is_empty());
     }
 
     #[test]
@@ -2428,94 +2386,90 @@ mod tests {
         let tree = binary_tree(BINARY_FULL);
 
         let mut cursor_0 = tree.cursor().unwrap();
-        binary_full_assert_0(&cursor_0);
+        assert_eq!(cursor_0.path(), &[0]);
+        assert_eq!(cursor_0.content, "ROOT");
+        assert_children!(cursor_0.node().children(), &[]);
         let mut cursor_1 = tree.cursor().unwrap();
-        binary_full_assert_0(&cursor_1);
+        assert_eq!(cursor_1.path(), &[0]);
+        assert_eq!(cursor_1.content, "ROOT");
+        assert_children!(cursor_1.node().children(), &[]);
 
         let mut cursor_2 = tree.cursor().unwrap();
-        binary_full_assert_0(&cursor_2);
+        assert_eq!(cursor_2.path(), &[0]);
+        assert_eq!(cursor_2.content, "ROOT");
+        assert_children!(cursor_2.node().children(), &[]);
         let mut cursor_3 = tree.cursor().unwrap();
-        binary_full_assert_0(&cursor_3);
+        assert_eq!(cursor_3.path(), &[0]);
+        assert_eq!(cursor_3.content, "ROOT");
+        assert_children!(cursor_3.node().children(), &[]);
 
         let mut cursor_4 = tree.cursor().unwrap();
-        binary_full_assert_0(&cursor_4);
+        assert_eq!(cursor_4.path(), &[0]);
+        assert_eq!(cursor_4.content, "ROOT");
+        assert_children!(cursor_4.node().children(), &[]);
         let mut cursor_5 = tree.cursor().unwrap();
-        binary_full_assert_0(&cursor_5);
+        assert_eq!(cursor_5.path(), &[0]);
+        assert_eq!(cursor_5.content, "ROOT");
+        assert_children!(cursor_5.node().children(), &[]);
 
         assert!(cursor_0.go_to(&[0, 0]).unwrap()); // ->
-        binary_full_assert_0_0(&cursor_0);
+        assert_eq!(cursor_0.path(), &[0, 0]);
+        assert_eq!(cursor_0.content, "L");
+        assert_children!(cursor_0.node().children(), &[]);
         assert!(cursor_1.go_to(&[0, 1]).unwrap()); // <-
-        binary_full_assert_0_1(&cursor_1);
+        assert_eq!(cursor_1.path(), &[0, 1]);
+        assert_eq!(cursor_1.content, "R");
+        assert_children!(cursor_1.node().children(), &[]);
 
         assert!(cursor_2.go_to(&[0, 0, 0]).unwrap()); // ->
-        binary_full_assert_0_0_0(&cursor_2);
+        assert_eq!(cursor_2.path(), &[0, 0, 0]);
+        assert_eq!(cursor_2.content, "LL");
+        assert_children!(cursor_2.node().children(), &[]);
         assert!(cursor_3.go_to(&[0, 1, 1]).unwrap()); // <-
-        binary_full_assert_0_1_1(&cursor_3);
+        assert_eq!(cursor_3.path(), &[0, 1, 1]);
+        assert_eq!(cursor_3.content, "RR");
+        assert_children!(cursor_3.node().children(), &[]);
 
         assert!(cursor_4.go_to(&[0, 0, 0, 0]).unwrap()); // ->
-        binary_full_assert_0_0_0_0(&cursor_4);
+        assert_eq!(cursor_4.path(), &[0, 0, 0, 0]);
+        assert_eq!(cursor_4.content, "LLL");
+        assert_children!(cursor_4.node().children(), &[]);
         assert!(cursor_5.go_to(&[0, 1, 1, 1]).unwrap()); // <-
-        binary_full_assert_0_1_1_1(&cursor_5);
+        assert_eq!(cursor_5.path(), &[0, 1, 1, 1]);
+        assert_eq!(cursor_5.content, "RRR");
+        assert_children!(cursor_5.node().children(), &[]);
 
         for _ in 0..10 {
             assert!(cursor_0.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1(&cursor_0);
             assert!(cursor_0.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0(&cursor_0);
             assert!(cursor_1.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0(&cursor_1);
             assert!(cursor_1.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1(&cursor_1);
 
             assert!(cursor_2.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0_1(&cursor_2);
             assert!(cursor_2.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1_0(&cursor_2);
             assert!(cursor_2.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1_1(&cursor_2);
             assert!(cursor_2.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0_0(&cursor_2);
             assert!(cursor_3.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1_0(&cursor_3);
             assert!(cursor_3.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0_1(&cursor_3);
             assert!(cursor_3.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0_0(&cursor_3);
             assert!(cursor_3.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1_1(&cursor_3);
 
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0_0_1(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0_1_0(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0_1_1(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1_0_0(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1_0_1(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1_1_0(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_1_1_1(&cursor_4);
             assert!(cursor_4.jump(Direction::Right).unwrap());
-            binary_full_assert_0_0_0_0(&cursor_4);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1_1_0(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1_0_1(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1_0_0(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0_1_1(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0_1_0(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0_0_1(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_0_0_0(&cursor_5);
             assert!(cursor_5.jump(Direction::Left).unwrap());
-            binary_full_assert_0_1_1_1(&cursor_5);
         }
     }
 
@@ -2530,102 +2484,62 @@ mod tests {
             |s| {
                 s.spawn(|| {
                     let mut cursor_0 = tree.cursor().unwrap();
-                    binary_full_assert_0(&cursor_0);
                     let mut cursor_1 = tree.cursor().unwrap();
-                    binary_full_assert_0(&cursor_1);
 
                     assert!(cursor_0.go_to(&[0, 0]).unwrap()); // ->
-                    binary_full_assert_0_0(&cursor_0);
                     assert!(cursor_1.go_to(&[0, 1]).unwrap()); // <-
-                    binary_full_assert_0_1(&cursor_1);
 
                     for _ in 0..40 {
                         assert!(cursor_0.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1(&cursor_0);
                         assert!(cursor_0.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0(&cursor_0);
                         assert!(cursor_1.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0(&cursor_1);
                         assert!(cursor_1.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1(&cursor_1);
                     }
                 });
 
                 s.spawn(|| {
                     let mut cursor_2 = tree.cursor().unwrap();
-                    binary_full_assert_0(&cursor_2);
                     let mut cursor_3 = tree.cursor().unwrap();
-                    binary_full_assert_0(&cursor_3);
 
                     assert!(cursor_2.go_to(&[0, 0, 0]).unwrap()); // ->
-                    binary_full_assert_0_0_0(&cursor_2);
                     assert!(cursor_3.go_to(&[0, 1, 1]).unwrap()); // <-
-                    binary_full_assert_0_1_1(&cursor_3);
 
                     for _ in 0..20 {
                         assert!(cursor_2.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0_1(&cursor_2);
                         assert!(cursor_2.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1_0(&cursor_2);
                         assert!(cursor_2.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1_1(&cursor_2);
                         assert!(cursor_2.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0_0(&cursor_2);
                         assert!(cursor_3.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1_0(&cursor_3);
                         assert!(cursor_3.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0_1(&cursor_3);
                         assert!(cursor_3.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0_0(&cursor_3);
                         assert!(cursor_3.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1_1(&cursor_3);
                     }
                 });
 
                 s.spawn(|| {
                     let mut cursor_4 = tree.cursor().unwrap();
-                    binary_full_assert_0(&cursor_4);
                     let mut cursor_5 = tree.cursor().unwrap();
-                    binary_full_assert_0(&cursor_5);
 
                     assert!(cursor_4.go_to(&[0, 0, 0, 0]).unwrap()); // ->
-                    binary_full_assert_0_0_0_0(&cursor_4);
                     assert!(cursor_5.go_to(&[0, 1, 1, 1]).unwrap()); // <-
-                    binary_full_assert_0_1_1_1(&cursor_5);
 
                     for _ in 0..10 {
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0_0_1(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0_1_0(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0_1_1(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1_0_0(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1_0_1(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1_1_0(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_1_1_1(&cursor_4);
                         assert!(cursor_4.jump(Direction::Right).unwrap());
-                        binary_full_assert_0_0_0_0(&cursor_4);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1_1_0(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1_0_1(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1_0_0(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0_1_1(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0_1_0(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0_0_1(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_0_0_0(&cursor_5);
                         assert!(cursor_5.jump(Direction::Left).unwrap());
-                        binary_full_assert_0_1_1_1(&cursor_5);
                     }
                 });
             }

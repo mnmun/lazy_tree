@@ -33,13 +33,18 @@
 //! Each [`node`] in the [`tree`] contains two [callbacks], which are invoked
 //! automatically by the [`cursor`] as it moves through the [`tree`]:
 //!
-//! - [`Total`] - invoked when the [`cursor`] moves to a [`node`]. It ensures
-//!   the [`Query`] callback functions correctly by calculating the `total`
-//!   number of child [`nodes`] for a given parent [`node`]. If this calculation
-//!   has already been performed for this [`node`], it is not repeated;
-//! - [`Query`] - invoked when the [`cursor`] moves downward to a child [`node`]
-//!   that has not yet been created. It handles the creation of a new child
-//!   [`node`] only when access to that [`node`] is actually required.
+//! - [`Total`] - invoked on the [`node`] to which the [`cursor`] has just
+//!   moved. It ensures the [`query`] callback functions correctly by
+//!   calculating the `total` number of child [`nodes`] for a given parent
+//!   [`node`]. If this calculation has already been performed for this
+//!   [`node`], it is not repeated;
+//! - [`Query`] - invoked on a parent [`node`] when the [`cursor`] moves to its
+//!   child [`node`] that has not yet been created. It handles the creation of
+//!   a new child [`node`] only when access to that [`node`] is actually
+//!   required.
+//!
+//! When a [`cursor`] is created, the [`total`] callback is called on the `root`
+//! [`node`] as if the [`cursor`] had moved to it from the parent [`node`].
 //!
 //! In this way, a developer can define the logic for constructing a [`tree`] of
 //! lazily-created [`nodes`] tailored to their specific use case by implementing
@@ -645,7 +650,9 @@
 //! [callbacks]: crate::callbacks
 //! [Callbacks]: crate::callbacks
 //! [`Total`]: crate::callbacks::Total
+//! [`total`]: crate::callbacks::Total
 //! [`Query`]: crate::callbacks::Query
+//! [`query`]: crate::callbacks::Query
 //! [creation]: crate::callbacks::Query
 //! [created]: crate::callbacks::Query
 //! [lazy_json]: https://github.com/mnmun/lazy_json

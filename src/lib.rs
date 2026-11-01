@@ -62,7 +62,7 @@
 //!       ...         ...         ...         ...
 //! ```
 //!
-//! Let the source data be represented by a slice of elements of type
+//! Let the `source` data be represented by a slice of elements of type
 //! `Option<&str>`, where missing [`nodes`] are denoted by `None`:
 //!
 //! ```rust

@@ -35,14 +35,7 @@ In this way, a developer can define the logic for constructing a `tree` of lazil
 
 The following example constructs a lazily-created binary `tree` from serialized data represented as `[ROOT, LEFT, RIGHT, LEFT-LEFT, LEFT-RIGHT, RIGHT-LEFT, RIGHT-RIGHT, ...]`:
 
-```plain
-                     ROOT                     
-          ┌───────────┴───────────┐           
-         LEFT                   RIGHT         
-    ┌─────┴─────┐           ┌─────┴─────┐     
-LEFT-LEFT   LEFT-RIGHT RIGHT-LEFT  RIGHT-RIGHT
-   ...         ...         ...         ...
-```
+![](https://github.com/mnmun/lazy_tree/blob/main/diagram.png?raw=true)
 
 Let the `source` data be represented by a slice of elements of type `Option<&str>`, where missing `nodes` are denoted by `None`:
 

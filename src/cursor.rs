@@ -16,13 +16,14 @@
 //! [`cursor`]: crate::Cursor
 //! [`node`]: crate::Node
 //! [`nodes`]: crate::Node
-//! [creation]: crate::callbacks::Query
+//! [creation]: crate::node::Callbacks::query
 
-use std::{marker::PhantomData, ops::Deref};
+use std::{marker::PhantomData, mem, ops::Deref};
 
 use getset::Getters;
+use tokio::sync::mpsc;
 
-use crate::node::Link;
+use crate::{node::Link, tree::Cleaning};
 
 #[cfg(test)]
 use crate::Node;
@@ -145,9 +146,13 @@ pub enum Direction {
 /// [`walk()`]: crate::Cursor::walk()
 /// [`jump()`]: crate::Cursor::jump()
 /// [`direction`]: crate::cursor::Direction
-/// [creation]: crate::callbacks::Query
+/// [creation]: crate::node::Callbacks::query
 #[derive(Debug, Getters)]
-pub struct Cursor<'tree, Value, Error> {
+pub struct Cursor<'tree, Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     /// # [`Link`] to the [`node`] the [`cursor`] is currently pointing to
     ///
     /// See the [`cursor`] documentation for more information.
@@ -174,6 +179,22 @@ pub struct Cursor<'tree, Value, Error> {
     /// [`node`]: crate::Node
     #[getset(get = "pub")]
     path: Vec<usize>,
+
+    /// # Communication channel with an asynchronous task for [`cursor`] parking
+    ///
+    /// On [`cursor`] `drop`, it sends a [`link`] to the [`node`] it points to
+    /// and the [`path`] to it to the channel.
+    ///
+    /// ---
+    ///
+    /// See the [`cursor`] documentation for more information.
+    ///
+    /// [`tree`]: crate::Tree
+    /// [`cursor`]: crate::Cursor
+    /// [`link`]: crate::node::Link
+    /// [`node`]: crate::Node
+    /// [`path`]: crate::Cursor::path()
+    cleaning: mpsc::UnboundedSender<Cleaning<Value, Error>>,
 
     /// # Important!
     ///
@@ -205,12 +226,24 @@ pub struct Cursor<'tree, Value, Error> {
 /// [`node`]: crate::Node
 /// [`link`]: crate::node::Link
 /// [`tree`]: crate::Tree
-unsafe impl<'tree, Value, Error> Send for Cursor<'tree, Value, Error> {}
+unsafe impl<'tree, Value, Error> Send for Cursor<'tree, Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
+}
 
-impl<'tree, Value, Error> Drop for Cursor<'tree, Value, Error> {
+impl<'tree, Value, Error> Drop for Cursor<'tree, Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     /// # Leaves all its [`nodes`]
     ///
     /// The [`cursor`] returns to the `root` [`node`] and then leaves it.
+    ///
+    /// Keep in mind that the [`cursor`] might not return to the `root` [`node`]
+    /// immediately.
     ///
     /// ---
     ///
@@ -220,12 +253,18 @@ impl<'tree, Value, Error> Drop for Cursor<'tree, Value, Error> {
     /// [`nodes`]: crate::Node
     /// [`cursor`]: crate::Cursor
     fn drop(&mut self) {
-        let _ = self.go_to(&[0]);
-        unsafe { self.link.as_mut().leave() }
+        let _ = self.cleaning.send(Cleaning::Park {
+            link: self.link,
+            path: mem::take(&mut self.path),
+        });
     }
 }
 
-impl<'tree, Value, Error> Deref for Cursor<'tree, Value, Error> {
+impl<'tree, Value, Error> Deref for Cursor<'tree, Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     type Target = Value;
 
     fn deref(&self) -> &Self::Target {
@@ -248,7 +287,11 @@ fn vec_equ<T: PartialEq>(a: &[T], b: &[T]) -> Option<usize> {
         .find_map(|(i, (x, y))| if x != y { Some(i) } else { None })
 }
 
-impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
+impl<'tree, Value, Error> Cursor<'tree, Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     /// # Creates a [`cursor`] pointed to the [`link`] with the given `path`
     ///
     /// Calls the [`enter()`] method for the [`node`], a [`link`] to which
@@ -267,16 +310,18 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`link`]: crate::node::Link
     /// [`enter()`]: crate::Node::enter()
     /// [`node`]: crate::Node
-    /// [`total`]: crate::callbacks::Total
-    pub(crate) fn new(
+    /// [`total`]: crate::node::Callbacks::total
+    pub(crate) async fn new(
         mut link: Link<Value, Error>,
         path: Vec<usize>,
+        sender: mpsc::UnboundedSender<Cleaning<Value, Error>>,
     ) -> Result<Self, Error> {
-        unsafe { link.as_mut().enter()? };
+        unsafe { link.as_mut().enter().await? };
 
         Ok(Cursor {
             link,
             path,
+            cleaning: sender,
             _marker: PhantomData,
         })
     }
@@ -290,7 +335,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// See the [`cursor`] documentation for more information.
     ///
     /// [`cursor`]: crate::Cursor
-    /// [`total`]: crate::callbacks::Total
+    /// [`total`]: crate::node::Callbacks::total
     /// [`node`]: crate::Node
     pub fn total(&self) -> Option<usize> {
         unsafe { self.link.as_ref().total }
@@ -306,8 +351,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// is returned to the `root` [`node`] and the attempt is considered
     /// **failed**.
     ///
-    /// Returns the success of the attempt or an `error` from [`Query`] or
-    /// [`Total`] callbacks if any of them fail.
+    /// Returns the success of the attempt or an `error` from [`query`] or
+    /// [`total`] callbacks if any of them fail.
     ///
     /// ---
     ///
@@ -315,10 +360,10 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     ///
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
-    /// [`queried`]: crate::callbacks::Query
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    pub fn go_to(&mut self, path: &[usize]) -> Result<bool, Error> {
+    /// [`queried`]: crate::node::Callbacks::query
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    pub async fn go_to(&mut self, path: &[usize]) -> Result<bool, Error> {
         if path.is_empty() {
             return Ok(false);
         }
@@ -327,7 +372,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         // wrong path with `Ok(false)`
         if path.first().is_some_and(|first| *first != 0) {
             while self.path.len() != 1 {
-                self.up();
+                self.up().await;
             }
             return Ok(false);
         }
@@ -341,13 +386,14 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         if let Some(i) = vec_equ(&self.path, path) {
             // Because above we handled the situation when `i` could be `0`
             while self.path.len() != i {
-                self.up();
+                self.up().await;
             }
         }
 
         if self.path.len() < path.len() {
             while self.path.len() != path.len() {
-                result &= self.down(Target::Index(path[self.path.len()]))?;
+                result &=
+                    self.down(Target::Index(path[self.path.len()])).await?;
 
                 if !result {
                     break;
@@ -355,7 +401,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
             }
         } else {
             while self.path.len() != path.len() {
-                self.up();
+                self.up().await;
             }
         }
 
@@ -385,8 +431,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// its current position and the attempt to move is considered **failed**.
     /// Otherwise the [`cursor`] successfully moves to the target [`node`].
     ///
-    /// Returns the success of the attempt or an `error` from [`Query`] or
-    /// [`Total`] callbacks if any of them fail.
+    /// Returns the success of the attempt or an `error` from [`query`] or
+    /// [`total`] callbacks if any of them fail.
     ///
     /// ## Details
     ///
@@ -470,15 +516,15 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`direction`]: crate::cursor::Direction
     /// [`target`]: crate::cursor::Target
     /// [`tree`]: crate::Tree
-    /// [`Query`]: crate::callbacks::Query
-    /// [`queried`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    pub fn walk(&mut self, direction: Direction) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`queried`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    pub async fn walk(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
-            Direction::Up => Ok(self.up()),
-            Direction::Down(target) => self.down(target),
-            Direction::Left => self.left(),
-            Direction::Right => self.right(),
+            Direction::Up => Ok(self.up().await),
+            Direction::Down(target) => self.down(target).await,
+            Direction::Left => self.left().await,
+            Direction::Right => self.right().await,
         }
     }
 
@@ -510,7 +556,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// When no branch exists in the requested horizontal [`direction`], the
     /// search wraps around the [`tree`].
     ///
-    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// Returns `true` or an `error` from [`query`] or [`total`] callbacks if
     /// any of them fail.
     ///
     /// ## Details
@@ -594,14 +640,14 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`nodes`]: crate::Node
     /// [`tree`]: crate::Tree
     /// [`tree's`]: crate::Tree
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    pub fn jump(&mut self, direction: Direction) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    pub async fn jump(&mut self, direction: Direction) -> Result<bool, Error> {
         match direction {
-            Direction::Up => self.jump_up(),
-            Direction::Down(target) => self.jump_down(target),
-            Direction::Left => self.jump_left(),
-            Direction::Right => self.jump_right(),
+            Direction::Up => self.jump_up().await,
+            Direction::Down(target) => self.jump_down(target).await,
+            Direction::Left => self.jump_left().await,
+            Direction::Right => self.jump_right().await,
         }
     }
 
@@ -612,8 +658,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// bounds (`0 <= index < total`), the attempt is considered **failed**, and
     /// the [`cursor`] remains unchanged.
     ///
-    /// Returns the success of the attempt or an `error` from [`Query`] or
-    /// [`Total`] callbacks if any of them fail.
+    /// Returns the success of the attempt or an `error` from [`query`] or
+    /// [`total`] callbacks if any of them fail.
     ///
     /// ---
     ///
@@ -623,9 +669,9 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`node`]: crate::Node
     /// [`entering`]: crate::Node::enter()
     /// [`target`]: crate::cursor::Target
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn down(&mut self, target: Target) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn down(&mut self, target: Target) -> Result<bool, Error> {
         unsafe {
             let total = self.link.as_ref().total.as_ref().unwrap();
 
@@ -639,26 +685,25 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
                 return Ok(false);
             }
 
-            let mut children = match self.link.as_ref().children.lock() {
-                Ok(guard) => guard,
-                Err(poison) => poison.into_inner(),
-            };
+            let mut children = self.link.as_ref().children.lock().await;
 
             let mut node = if let Some(node) = children.get(&index) {
                 *node
             } else {
-                let node = (self.link.as_ref().callbacks.query)(
-                    &self.link.as_mut().value,
-                    index,
-                )?
-                .with_parent(self.link)
-                .build();
+                let node = self
+                    .link
+                    .as_ref()
+                    .callbacks
+                    .query(&mut self.link.as_mut().value, index)
+                    .await?
+                    .with_parent(self.link)
+                    .build();
 
                 children.insert(index, node);
                 *children.get(&index).unwrap()
             };
 
-            node.as_mut().enter()?;
+            node.as_mut().enter().await?;
             self.link = node;
             self.path.push(index);
 
@@ -668,7 +713,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
 
     /// # Moves the [`cursor`] to the [`target`] child [`node`] or the [`tree`] `root`
     ///
-    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// Returns `true` or an `error` from [`query`] or [`total`] callbacks if
     /// any of them fail.
     ///
     /// ---
@@ -679,11 +724,11 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`node`]: crate::Node
     /// [`target`]: crate::cursor::Target
     /// [`tree`]: crate::Tree
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn jump_down(&mut self, target: Target) -> Result<bool, Error> {
-        if !self.down(target)? {
-            self.go_to(&[0])?;
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn jump_down(&mut self, target: Target) -> Result<bool, Error> {
+        if !self.down(target).await? {
+            self.go_to(&[0]).await?;
         }
 
         Ok(true)
@@ -695,8 +740,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// child [`node`]. If there is no parent [`node`], the attempt is
     /// considered **failed**, and the [`cursor`] remains unchanged.
     ///
-    /// Returns the success of the attempt or an `error` from [`Query`] or
-    /// [`Total`] callbacks if any of them fail.
+    /// Returns the success of the attempt or an `error` from [`query`] or
+    /// [`total`] callbacks if any of them fail.
     ///
     /// ---
     ///
@@ -705,14 +750,14 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`cursor`]: crate::Cursor
     /// [`node`]: crate::Node
     /// [`leaving`]: crate::Node::leave()
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn up(&mut self) -> bool {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn up(&mut self) -> bool {
         unsafe {
             if let Some(parent) = self.link.as_ref().parent {
-                self.link.as_mut().leave();
+                self.link.as_mut().leave().await;
                 self.link = parent;
-                self.link.as_mut().cleanup(self.path.pop().unwrap());
+                self.link.as_mut().cleanup(self.path.pop().unwrap()).await;
 
                 return true;
             }
@@ -727,7 +772,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// though first child [`nodes`] until reaching the deepest leaf [`node`].
     /// Otherwise moves the [`cursor`] to its parent [`node`].
     ///
-    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// Returns `true` or an `error` from [`query`] or [`total`] callbacks if
     /// any of them fail.
     ///
     /// ---
@@ -738,11 +783,11 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`node`]: crate::Node
     /// [`nodes`]: crate::Node
     /// [`tree`]: crate::Tree
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn jump_up(&mut self) -> Result<bool, Error> {
-        if !self.up() {
-            while self.down(Target::First)? {}
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn jump_up(&mut self) -> Result<bool, Error> {
+        if !self.up().await {
+            while self.down(Target::First).await? {}
         }
 
         Ok(true)
@@ -756,8 +801,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// performed, the [`cursor`] is returned to the previous [`node`] using
     /// [`down(Target::Index(i))`], and the attempt is considered **failed**.
     ///
-    /// Returns the success of the attempt or an `error` from [`Query`] or
-    /// [`Total`] callbacks if any of them fail.
+    /// Returns the success of the attempt or an `error` from [`query`] or
+    /// [`total`] callbacks if any of them fail.
     ///
     /// ---
     ///
@@ -768,17 +813,17 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`up()`]: crate::Cursor::up()
     /// [`down(Target::Index(i + 1))`]: crate::Cursor::down()
     /// [`down(Target::Index(i))`]: crate::Cursor::down()
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn right(&mut self) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn right(&mut self) -> Result<bool, Error> {
         let i = *self.path.last().unwrap();
 
-        if !self.up() {
+        if !self.up().await {
             return Ok(false);
         }
 
-        if !self.down(Target::Index(i + 1))? {
-            self.down(Target::Index(i))?;
+        if !self.down(Target::Index(i + 1)).await? {
+            self.down(Target::Index(i)).await?;
             return Ok(false);
         }
 
@@ -796,7 +841,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// exiting the loop, the [`cursor`] descends to the same depth as it was
     /// at the beginning using [`down(Target::First)`] in the loop.
     ///
-    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// Returns `true` or an `error` from [`query`] or [`total`] callbacks if
     /// any of them fail.
     ///
     /// ---
@@ -809,15 +854,15 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`down(Target::Index(i + 1))`]: crate::Cursor::down()
     /// [`down(Target::Index(i))`]: crate::Cursor::down()
     /// [`down(Target::First)`]: crate::Cursor::down()
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn jump_right(&mut self) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn jump_right(&mut self) -> Result<bool, Error> {
         let initial_path_len = self.path.len();
 
         let mut i = *self.path.last().unwrap();
 
-        while self.up() {
-            if self.down(Target::Index(i + 1))? {
+        while self.up().await {
+            if self.down(Target::Index(i + 1)).await? {
                 break;
             }
 
@@ -825,7 +870,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         }
 
         while self.path.len() != initial_path_len {
-            if !self.down(Target::First)? {
+            if !self.down(Target::First).await? {
                 break;
             }
         }
@@ -841,8 +886,8 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// performed, the [`cursor`] is returned to the previous [`node`] using
     /// [`down(Target::Index(i))`], and the attempt is considered **failed**.
     ///
-    /// Returns the success of the attempt or an `error` from [`Query`] or
-    /// [`Total`] callbacks if any of them fail.
+    /// Returns the success of the attempt or an `error` from [`query`] or
+    /// [`total`] callbacks if any of them fail.
     ///
     /// ---
     ///
@@ -853,21 +898,21 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`up()`]: crate::Cursor::up()
     /// [`down(Target::Index(i - 1))`]: crate::Cursor::down()
     /// [`down(Target::Index(i))`]: crate::Cursor::down()
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn left(&mut self) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn left(&mut self) -> Result<bool, Error> {
         let i = *self.path.last().unwrap();
 
         if i == 0 {
             return Ok(false);
         }
 
-        if !self.up() {
+        if !self.up().await {
             return Ok(false);
         }
 
-        if !self.down(Target::Index(i - 1))? {
-            self.down(Target::Index(i))?;
+        if !self.down(Target::Index(i - 1)).await? {
+            self.down(Target::Index(i)).await?;
             return Ok(false);
         }
 
@@ -885,7 +930,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// exiting the loop, the [`cursor`] descends to the same depth as it was
     /// at the beginning using [`down(Target::Last)`] in the loop.
     ///
-    /// Returns `true` or an `error` from [`Query`] or [`Total`] callbacks if
+    /// Returns `true` or an `error` from [`query`] or [`total`] callbacks if
     /// any of them fail.
     ///
     /// ---
@@ -898,16 +943,16 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
     /// [`down(Target::Index(i - 1))`]: crate::Cursor::down()
     /// [`down(Target::Index(i))`]: crate::Cursor::down()
     /// [`down(Target::Last)`]: crate::Cursor::down()
-    /// [`Query`]: crate::callbacks::Query
-    /// [`Total`]: crate::callbacks::Total
-    fn jump_left(&mut self) -> Result<bool, Error> {
+    /// [`query`]: crate::node::Callbacks::query
+    /// [`total`]: crate::node::Callbacks::total
+    async fn jump_left(&mut self) -> Result<bool, Error> {
         let initial_path_len = self.path.len();
 
         let mut i = *self.path.last().unwrap();
 
-        while self.up() {
+        while self.up().await {
             if i != 0 {
-                self.down(Target::Index(i - 1))?;
+                self.down(Target::Index(i - 1)).await?;
                 break;
             }
 
@@ -915,7 +960,7 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
         }
 
         while self.path.len() != initial_path_len {
-            if !self.down(Target::Last)? {
+            if !self.down(Target::Last).await? {
                 break;
             }
         }
@@ -925,7 +970,11 @@ impl<'tree, Value, Error> Cursor<'tree, Value, Error> {
 }
 
 #[cfg(test)]
-impl<Value, Error> Cursor<'_, Value, Error> {
+impl<Value, Error> Cursor<'_, Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     pub fn node(&self) -> &Node<Value, Error> {
         unsafe { self.link.as_ref() }
     }

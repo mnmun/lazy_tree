@@ -16,7 +16,8 @@
 //! [`link`]: crate::node::Link
 //! [create]: crate::Tree::cursor()
 //! [`cursors`]: crate::Cursor
-use std::fmt::Debug;
+use std::fmt;
+use tokio::sync::mpsc;
 
 use crate::{
     Cursor,
@@ -48,6 +49,22 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// [`Tree::drop()`]: crate::Tree::drop()
 #[cfg(test)]
 pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
+
+/// # Asynchronous task kinds
+///
+/// See the [`Tree::new()`] method documentation for more information.
+pub(crate) enum Cleaning<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
+    Park {
+        link: Link<Value, Error>,
+        path: Vec<usize>,
+    },
+    Drop(Link<Value, Error>),
+    Close,
+}
 
 /// # `Tree` of lazily-created [`nodes`]
 ///
@@ -91,11 +108,36 @@ pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
 /// [`Cursors`]: crate::Cursor
 /// [`Tree::new()`]: crate::Tree::new()
 /// [`builder`]: crate::node::Builder
-/// [creation]: crate::callbacks::Query
+/// [creation]: crate::node::Callbacks::query
 /// [`Sync`]: std::marker::Sync
 /// [`Send`]: std::marker::Send
-pub struct Tree<Value, Error> {
+pub struct Tree<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
+    /// # [`Link`] to the `root` [`node`]
+    ///
+    /// See the [`tree`] documentation for more information.
+    ///
+    /// [`Link`]: crate::node::Link
+    /// [`node`]: crate::Node
+    /// [`tree`]: crate::Tree
     pub(crate) root: Link<Value, Error>,
+
+    /// # Communication channel with an asynchronous task for deleting the `root` [`node`]
+    ///
+    /// On [`tree`] `drop`, it sends a [`link`] to the `root` [`node`] for
+    /// deleting to the channel.
+    ///
+    /// ---
+    ///
+    /// See the [`tree`] documentation for more information.
+    ///
+    /// [`tree`]: crate::Tree
+    /// [`link`]: crate::node::Link
+    /// [`node`]: crate::Node
+    cleaning: mpsc::UnboundedSender<Cleaning<Value, Error>>,
 }
 
 /// # Safety
@@ -109,12 +151,18 @@ pub struct Tree<Value, Error> {
 ///
 /// [`tree`]: crate::Tree
 /// [`Tree`]: crate::Tree
-unsafe impl<Value, Error> Sync for Tree<Value, Error> {}
+unsafe impl<Value, Error> Sync for Tree<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
+}
 
 /// # Safety
 ///
 /// [`Tree`] can be safely sent between threads, since the borrow checked
-/// ensures that the cursor cannot outlive the tree from which it was created.
+/// ensures that the [`cursor`] cannot outlive the [`tree`] from which it was
+/// created.
 ///
 /// ---
 ///
@@ -122,15 +170,31 @@ unsafe impl<Value, Error> Sync for Tree<Value, Error> {}
 ///
 /// [`tree`]: crate::Tree
 /// [`Tree`]: crate::Tree
-unsafe impl<Value, Error> Send for Tree<Value, Error> {}
+/// [`cursor`]: crate::Cursor
+unsafe impl<Value, Error> Send for Tree<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
+}
 
-impl<Value, Error> Debug for Tree<Value, Error> {
+impl<Value, Error> fmt::Debug for Tree<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Tree").field("root", &self.root).finish()
+        f.debug_struct("Tree")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
     }
 }
 
-impl<'tree, Value, Error> Tree<Value, Error> {
+impl<'tree, Value, Error> Tree<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     /// # Creates a [`tree`] based on a `root` [`node`] [`builder`]
     ///
     /// See the [`tree`] documentation for more information.
@@ -139,8 +203,41 @@ impl<'tree, Value, Error> Tree<Value, Error> {
     /// [`node`]: crate::Node
     /// [`builder`]: crate::node::Builder
     pub fn new(builder: impl Into<node::Builder<Value, Error>>) -> Self {
+        let (cleaning, mut receiver) =
+            mpsc::unbounded_channel::<Cleaning<Value, Error>>();
+
+        tokio::spawn(async move {
+            while let Some(message) = receiver.recv().await {
+                match message {
+                    Cleaning::Park { mut link, mut path } => unsafe {
+                        while let Some(parent) = link.as_ref().parent {
+                            link.as_mut().leave().await;
+                            link = parent;
+                            link.as_mut().cleanup(path.pop().unwrap()).await;
+                        }
+
+                        link.as_mut().leave().await;
+                    },
+                    Cleaning::Drop(link) => {
+                        drop_link(link).await;
+                    }
+                    Cleaning::Close => break,
+                }
+            }
+
+            #[cfg(test)]
+            {
+                let remaining = NODES_ALIVE.load(Ordering::Acquire);
+
+                if remaining != 0 {
+                    panic!("Memory leak! {remaining} nodes are still alive");
+                }
+            }
+        });
+
         Self {
             root: builder.into().build(),
+            cleaning,
         }
     }
 
@@ -157,22 +254,31 @@ impl<'tree, Value, Error> Tree<Value, Error> {
     /// [`tree`]: crate::Tree
     /// [`node`]: crate::Node
     /// [`path`]: crate::Cursor::path()
-    pub fn cursor(&'tree self) -> Result<Cursor<'tree, Value, Error>, Error> {
-        Cursor::new(self.root, vec![0])
+    pub async fn cursor(
+        &'tree self,
+    ) -> Result<Cursor<'tree, Value, Error>, Error> {
+        Cursor::new(self.root, vec![0], self.cleaning.clone()).await
     }
 }
 
-impl<Value, Error> Drop for Tree<Value, Error> {
+/// # Deallocates the entire [`tree`] of [`nodes`]
+///
+/// Keep in mind that the removal of [`nodes`] might not be completed
+/// immediately.
+///
+/// ---
+///
+/// See the [`tree`] documentation for more information.
+///
+/// [`tree`]: crate::Tree
+/// [`nodes`]: crate::Node
+impl<Value, Error> Drop for Tree<Value, Error>
+where
+    Value: Send + 'static,
+    Error: Send + 'static,
+{
     fn drop(&mut self) {
-        drop_link(self.root);
-
-        #[cfg(test)]
-        {
-            let remaining = NODES_ALIVE.load(Ordering::Acquire);
-
-            if remaining != 0 {
-                panic!("Memory leak! {remaining} nodes are still alive");
-            }
-        }
+        let _ = self.cleaning.send(Cleaning::Drop(self.root));
+        let _ = self.cleaning.send(Cleaning::Close);
     }
 }

@@ -1,19 +1,22 @@
 [package]
 name = "lazy_tree"
-description = "tree of lazily-created nodes with cursor-based traversal"
+description = "tree of lazily-created nodes with asynchronous cursor-based traversal"
 version = "0.0.0"
 authors = ["mnmun <mnmnmun@proton.me>"]
 homepage = "https://github.com/mnmun/lazy_tree"
 repository = "https://github.com/mnmun/lazy_tree"
 readme = "README.md"
-exclude = ["diagrams", "flake.nix", "flake.lock"]
+exclude = ["diagram.png", "flake.nix", "flake.lock", "example"]
 license = "MIT"
 edition = "2024"
 
 [dependencies]
+async-trait = "0.1.92"
 document-features = "0.2.12"
 getset = "0.1.7"
+tokio = { version = "1.39.3", features = ["rt", "sync"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
 serial_test = "4.0.1"
+tokio = { version = "1.39.3", features = ["macros", "sync", "rt-multi-thread", "time"] }

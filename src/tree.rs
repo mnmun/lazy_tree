@@ -16,7 +16,7 @@
 //! [`link`]: crate::node::Link
 //! [create]: crate::Tree::cursor()
 //! [`cursors`]: crate::Cursor
-use std::fmt;
+use std::{fmt, thread};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -206,33 +206,44 @@ where
         let (cleaning, mut receiver) =
             mpsc::unbounded_channel::<Cleaning<Value, Error>>();
 
-        tokio::spawn(async move {
-            while let Some(message) = receiver.recv().await {
-                match message {
-                    Cleaning::Park { mut link, mut path } => unsafe {
-                        while let Some(parent) = link.as_ref().parent {
+        thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                while let Some(message) = receiver.recv().await {
+                    match message {
+                        Cleaning::Park { mut link, mut path } => unsafe {
+                            while let Some(parent) = link.as_ref().parent {
+                                link.as_mut().leave().await;
+                                link = parent;
+                                link.as_mut()
+                                    .cleanup(path.pop().unwrap())
+                                    .await;
+                            }
+
                             link.as_mut().leave().await;
-                            link = parent;
-                            link.as_mut().cleanup(path.pop().unwrap()).await;
+                        },
+                        Cleaning::Drop(link) => {
+                            drop_link(link).await;
                         }
-
-                        link.as_mut().leave().await;
-                    },
-                    Cleaning::Drop(link) => {
-                        drop_link(link).await;
+                        Cleaning::Close => break,
                     }
-                    Cleaning::Close => break,
                 }
-            }
 
-            #[cfg(test)]
-            {
-                let remaining = NODES_ALIVE.load(Ordering::Acquire);
+                #[cfg(test)]
+                {
+                    let remaining = NODES_ALIVE.load(Ordering::Acquire);
 
-                if remaining != 0 {
-                    panic!("Memory leak! {remaining} nodes are still alive");
+                    if remaining != 0 {
+                        panic!(
+                            "Memory leak! {remaining} nodes are still alive"
+                        );
+                    }
                 }
-            }
+            })
         });
 
         Self {

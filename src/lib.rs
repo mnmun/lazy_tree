@@ -656,7 +656,7 @@ pub use tree::Tree;
 #[cfg(test)]
 mod tests {
 
-    use std::{ops::Deref, sync::Arc, time::Duration};
+    use std::{ops::Deref, sync::Arc, thread, time::Duration};
 
     use async_trait::async_trait;
     use pretty_assertions::assert_eq;
@@ -2533,7 +2533,7 @@ mod tests {
                 assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
                 assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
 
-                for _ in 0..40 {
+                for _ in 0..4000 {
                     assert!(cursor_0.jump(Direction::Right).await.unwrap());
                     assert!(cursor_0.jump(Direction::Right).await.unwrap());
                     assert!(cursor_1.jump(Direction::Left).await.unwrap());
@@ -2552,7 +2552,7 @@ mod tests {
                 assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
                 assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
 
-                for _ in 0..20 {
+                for _ in 0..2000 {
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
@@ -2575,7 +2575,7 @@ mod tests {
                 assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
                 assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
 
-                for _ in 0..10 {
+                for _ in 0..1000 {
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
@@ -2602,5 +2602,163 @@ mod tests {
         result_0.unwrap();
         result_1.unwrap();
         result_2.unwrap();
+    }
+
+    #[test]
+    #[serial]
+    fn multiple_cursors_parallel() {
+        let tree = Arc::new(binary_tree(BINARY_FULL));
+
+        thread::scope(|scope| {
+            scope.spawn({
+                let tree = tree.clone();
+
+                move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+
+                    rt.block_on(async move {
+                        let mut cursor_0 = tree.cursor().await.unwrap();
+                        let mut cursor_1 = tree.cursor().await.unwrap();
+
+                        assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
+                        assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
+
+                        for _ in 0..4000 {
+                            assert!(
+                                cursor_0.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_0.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_1.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_1.jump(Direction::Left).await.unwrap()
+                            );
+                        }
+                    });
+                }
+            });
+
+            scope.spawn({
+                let tree = tree.clone();
+
+                move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+
+                    rt.block_on(async move {
+                        let mut cursor_2 = tree.cursor().await.unwrap();
+                        let mut cursor_3 = tree.cursor().await.unwrap();
+
+                        assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
+                        assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
+
+                        for _ in 0..2000 {
+                            assert!(
+                                cursor_2.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_2.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_2.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_2.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_3.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_3.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_3.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_3.jump(Direction::Left).await.unwrap()
+                            );
+                        }
+                    });
+                }
+            });
+
+            scope.spawn({
+                let tree = tree.clone();
+
+                move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+
+                    rt.block_on(async move {
+                        let mut cursor_4 = tree.cursor().await.unwrap();
+                        let mut cursor_5 = tree.cursor().await.unwrap();
+
+                        assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
+                        assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
+
+                        for _ in 0..1000 {
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_4.jump(Direction::Right).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                            assert!(
+                                cursor_5.jump(Direction::Left).await.unwrap()
+                            );
+                        }
+                    });
+                }
+            });
+        });
     }
 }

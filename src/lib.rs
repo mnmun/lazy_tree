@@ -2,7 +2,7 @@
 //! [`nodes`] using [`cursors`] without having to create the entire [`node`]
 //! [`tree`] structure in advance. [`Nodes`] are [created] automatically using
 //! [`callbacks`] when the [`cursor`] needs to access them and are deleted when
-//! they are no longer used. Currently implemented for [tokio] runtime.
+//! they are no longer used. Currently implemented for the [tokio] runtime.
 //!
 //! Used in [lazy_json].
 //!
@@ -632,6 +632,7 @@
 //! [created]: crate::node::Callbacks::query
 //! [lazy_json]: https://github.com/mnmun/lazy_json
 //! [examples/demo.rs]: https://github.com/mnmun/lazy_tree/blob/main/examples/demo.rs
+//! [tokio]: tokio
 
 #![allow(dead_code)]
 #![deny(rustdoc::broken_intra_doc_links)]

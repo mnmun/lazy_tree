@@ -1,6 +1,6 @@
 # lazy_tree
 
-Makes it possible to asynchronously traverse a `tree` of lazily-created `nodes` using `cursors` without having to create the entire `node` `tree` structure in advance. `Nodes` are created automatically using `callbacks` when the `cursor` needs to access them and are deleted when they are no longer used. Currently implemented for [tokio](https://tokio.rs) runtime.
+Makes it possible to asynchronously traverse a `tree` of lazily-created `nodes` using `cursors` without having to create the entire `node` `tree` structure in advance. `Nodes` are created automatically using `callbacks` when the `cursor` needs to access them and are deleted when they are no longer used. Currently implemented for the [tokio](https://tokio.rs) runtime.
 
 Used in [lazy_json](https://github.com/mnmun/lazy_json).
 

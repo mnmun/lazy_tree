@@ -661,6 +661,44 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serial_test::serial;
 
+    macro_rules! runtime_test {
+        ($body:ident) => {
+            mod $body {
+                use super::*;
+
+                #[tokio::test(flavor = "current_thread")]
+                #[serial]
+                async fn tokio_current() {
+                    $body().await
+                }
+
+                #[tokio::test(flavor = "multi_thread")]
+                #[serial]
+                async fn tokio_multi() {
+                    $body().await
+                }
+
+                #[test]
+                #[serial]
+                fn futures() {
+                    futures::executor::block_on($body())
+                }
+
+                #[test]
+                #[serial]
+                fn futures_lite() {
+                    futures_lite::future::block_on($body())
+                }
+
+                #[test]
+                #[serial]
+                fn smol() {
+                    smol::block_on($body())
+                }
+            }
+        };
+    }
+
     use crate::{
         Node, Tree,
         cursor::{Direction, Target},
@@ -999,8 +1037,7 @@ mod tests {
         /* [0, 1, 1, 1] */ Some("RRR"),
     ];
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(go_to);
     /// Uses [`BINARY_0`]
     async fn go_to() {
         let tree = binary_tree(BINARY_0);
@@ -1052,8 +1089,7 @@ mod tests {
         assert!(!cursor.go_to(&[0, 0, 0, 0, 0, 0, 0]).await.unwrap());
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(wrong_go_to);
     /// Uses [`BINARY_0`]
     async fn wrong_go_to() {
         let tree = binary_tree(BINARY_0);
@@ -1088,8 +1124,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_up_from_root);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from ROOT to LL
@@ -1106,8 +1141,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_up);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from LL to L
@@ -1129,8 +1163,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_up_from_root_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn jump_up_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -1145,8 +1178,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_down_from_leaf);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from RLL to ROOT
@@ -1208,8 +1240,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_down);
     /// Uses [`BINARY_0`]
     ///
     /// Jumps from:
@@ -1274,8 +1305,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_down_from_root_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn jump_down_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -1315,8 +1345,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_up_from_root);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from ROOT to LL
@@ -1333,8 +1362,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_up);
     /// Uses [`BINARY_0`]
     ///
     /// Move from LL to L
@@ -1356,8 +1384,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_up_from_root_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn walk_up_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -1372,8 +1399,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_down_from_leaf);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from RLL to ROOT
@@ -1395,8 +1421,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_down);
     /// Uses [`BINARY_0`]
     ///
     /// Attempts to walk from:
@@ -1461,8 +1486,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_down_from_root_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn walk_down_from_root_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -1502,8 +1526,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_across_tree_different_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from LL to RR
@@ -1525,8 +1548,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_across_tree_same_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from L to R
@@ -1548,8 +1570,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_across_tree_to_shorter_branch);
     /// Uses [`BINARY_2`]
     ///
     /// Jump from LLL to LR
@@ -1571,8 +1592,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_across_tree_to_longer_branch);
     /// Uses [`BINARY_1`]
     ///
     /// Jump from LL to LR
@@ -1595,8 +1615,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_in_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from R to L
@@ -1618,8 +1637,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_between_branches_to_shorter_branch);
     /// Uses [`BINARY_1`]
     ///
     /// Jump from LRL to LL
@@ -1641,8 +1659,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_between_branches_to_longer_branch);
     /// Uses [`BINARY_3`]
     ///
     /// Jump from LRL to LLL
@@ -1664,8 +1681,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_between_branches_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from RL to LR
@@ -1687,8 +1703,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_in_list);
     /// Uses [`LIST`]
     async fn jump_left_in_list() {
         let tree = binary_tree(LIST);
@@ -1708,8 +1723,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_left_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn jump_left_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -1724,8 +1738,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_across_tree_different_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from RR to LL
@@ -1747,8 +1760,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_across_tree_same_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from R to L
@@ -1770,8 +1782,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_across_tree_to_shorter_branch);
     /// Uses [`BINARY_1`]
     ///
     /// Jump from LRL to LL
@@ -1793,8 +1804,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_across_tree_to_longer_branch);
     /// Uses [`BINARY_2`]
     ///
     /// Jump from LR to LL
@@ -1816,8 +1826,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_in_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from L to R
@@ -1839,8 +1848,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_between_branches_to_shorter_branch);
     /// Uses [`BINARY_2`]
     ///
     /// Jump from LLL to LR
@@ -1862,8 +1870,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_between_branches_to_longer_branch);
     /// Uses [`BINARY_4`]
     ///
     /// Jump from LLL to LRL
@@ -1885,8 +1892,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_between_branches_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Jump from LR to RL
@@ -1908,8 +1914,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_in_list);
     /// Uses [`LIST`]
     async fn jump_right_in_list() {
         let tree = binary_tree(LIST);
@@ -1929,8 +1934,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(jump_right_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn jump_right_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -1945,8 +1949,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_across_tree_different_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from LL to RR
@@ -1968,8 +1971,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_across_tree_same_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from L to R
@@ -1991,8 +1993,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_across_tree_to_shorter_branch);
     /// Uses [`BINARY_2`]
     ///
     /// Attempt to walk from LLL to LR
@@ -2014,8 +2015,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_across_tree_to_longer_branch);
     /// Uses [`BINARY_1`]
     ///
     /// Attempt to walk from LL to LR
@@ -2038,8 +2038,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_in_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Move from R to L
@@ -2061,8 +2060,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_between_branches_to_shorter_branch);
     /// Uses [`BINARY_1`]
     ///
     /// Attempt to walk from LRL to LL
@@ -2084,8 +2082,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_between_branches_to_longer_branch);
     /// Uses [`BINARY_3`]
     ///
     /// Attempt to walk from LRL to LLL
@@ -2107,8 +2104,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_between_branches_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from RL to LR
@@ -2130,8 +2126,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_in_list);
     /// Uses [`LIST`]
     async fn walk_left_in_list() {
         let tree = binary_tree(LIST);
@@ -2151,8 +2146,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_left_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn walk_left_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -2167,8 +2161,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_across_tree_different_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from RR to LL
@@ -2190,8 +2183,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_across_tree_same_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from R to L
@@ -2213,8 +2205,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_across_tree_to_shorter_branch);
     /// Uses [`BINARY_1`]
     ///
     /// Attempt to walk from LRL to LL
@@ -2236,8 +2227,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_across_tree_to_longer_branch);
     /// Uses [`BINARY_2`]
     ///
     /// Attempt to walk from LR to LL
@@ -2259,8 +2249,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_in_branch_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Move from L to R
@@ -2282,8 +2271,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_between_branches_to_shorter_branch);
     /// Uses [`BINARY_2`]
     ///
     /// Attempt to walk from LLL to LR
@@ -2305,8 +2293,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_between_branches_to_longer_branch);
     /// Uses [`BINARY_4`]
     ///
     /// Attempt to walk from LLL to LRL
@@ -2328,8 +2315,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_between_branches_same_depth);
     /// Uses [`BINARY_0`]
     ///
     /// Attempt to walk from LR to RL
@@ -2351,8 +2337,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_in_list);
     /// Uses [`LIST`]
     async fn walk_right_in_list() {
         let tree = binary_tree(LIST);
@@ -2372,8 +2357,7 @@ mod tests {
         assert_children!(cursor.node().children(), &[]);
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(walk_right_in_empty_tree);
     /// Uses [`EMPTY`]
     async fn walk_right_in_empty_tree() {
         let tree = binary_tree(EMPTY);
@@ -2423,8 +2407,7 @@ mod tests {
         assert!(root.children().await.is_empty());
     }
 
-    #[tokio::test]
-    #[serial]
+    runtime_test!(multiple_cursors_sequentially);
     /// Uses [`BINARY_FULL`]
     async fn multiple_cursors_sequentially() {
         let tree = binary_tree(BINARY_FULL);
@@ -2647,12 +2630,7 @@ mod tests {
                 let tree = tree.clone();
 
                 move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .unwrap();
-
-                    rt.block_on(async move {
+                    futures_lite::future::block_on(async move {
                         let mut cursor_2 = tree.cursor().await.unwrap();
                         let mut cursor_3 = tree.cursor().await.unwrap();
 
@@ -2693,12 +2671,7 @@ mod tests {
                 let tree = tree.clone();
 
                 move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .unwrap();
-
-                    rt.block_on(async move {
+                    smol::block_on(async move {
                         let mut cursor_4 = tree.cursor().await.unwrap();
                         let mut cursor_5 = tree.cursor().await.unwrap();
 

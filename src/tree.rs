@@ -17,6 +17,7 @@
 //! [create]: crate::Tree::cursor()
 //! [`cursors`]: crate::Cursor
 use std::{fmt, thread};
+
 use tokio::sync::mpsc;
 
 use crate::{
@@ -207,12 +208,7 @@ where
             mpsc::unbounded_channel::<Cleaning<Value, Error>>();
 
         thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-
-            rt.block_on(async move {
+            futures_lite::future::block_on(async move {
                 while let Some(message) = receiver.recv().await {
                     match message {
                         Cleaning::Park { mut link, mut path } => unsafe {

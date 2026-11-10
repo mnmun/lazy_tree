@@ -19,7 +19,6 @@
 //! [`tree`]: crate::Tree
 //! [`query`]: crate::node::Callbacks::query
 //! [`builder`]: crate::node::Builder
-use async_trait::async_trait;
 use std::{
     collections::{HashMap, hash_map::Entry},
     fmt,
@@ -28,12 +27,13 @@ use std::{
     pin::Pin,
     ptr::{self, NonNull},
 };
+
+use async_trait::async_trait;
+use getset::{Getters, MutGetters};
 use tokio::sync::Mutex;
 
 #[cfg(test)]
 use tokio::sync::MutexGuard;
-
-use getset::{Getters, MutGetters};
 
 /// # [`NonNull`] pointer to a [`node`]
 ///

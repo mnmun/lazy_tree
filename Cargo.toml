@@ -13,10 +13,13 @@ edition = "2024"
 [dependencies]
 async-trait = "0.1.92"
 document-features = "0.2.12"
+futures-lite = "2.6.1"
 getset = "0.1.7"
-tokio = { version = "1.39.3", features = ["rt", "sync"] }
+tokio = { version = "1.39.3", features = ["sync"] }
 
 [dev-dependencies]
+futures = "0.3.34"
 pretty_assertions = "1.4.1"
 serial_test = "4.0.1"
+smol = "2.0.2"
 tokio = { version = "1.39.3", features = ["macros", "sync", "rt-multi-thread", "time"] }

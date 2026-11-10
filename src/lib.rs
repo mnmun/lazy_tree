@@ -2,17 +2,17 @@
 //! [`nodes`] using [`cursors`] without having to create the entire [`node`]
 //! [`tree`] structure in advance. [`Nodes`] are [created] automatically using
 //! [`callbacks`] when the [`cursor`] needs to access them and are deleted when
-//! they are no longer used. Currently implemented for the [tokio] runtime.
+//! they are no longer used.
 //!
-//! Used in [lazy_json].
+//! Used in [`lazy_json`].
 //!
 //! ## [`Tree`]
 //!
 //! ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 //!
-//! [`Tree`] is a wrapper aroung the [`link`] to the `root` [`node`] with the
-//! ability to create [`cursors`] for traversing hierarchical structure of
-//! lazily-created [`nodes`]. [`Tree`] may have multiple [`cursors`] at the
+//! [`Tree`] is a wrapper aroung the [`NonNull`] pointer to the `root` [`node`]
+//! with the ability to create [`cursors`] for traversing hierarchical structure
+//! of lazily-created [`nodes`]. [`Tree`] may have multiple [`cursors`] at the
 //! same time, pointing to different [`nodes`] and moving independently of each
 //! other.
 //!
@@ -619,8 +619,7 @@
 //! [`node's`]: crate::Node
 //! [`nodes`]: crate::Node
 //! [`builder`]: crate::node::Builder
-//! [`link`]: crate::node::Link
-//! [`links`]: crate::node::Link
+//! [`NonNull`]: std::ptr::NonNull
 //! [`cursor`]: crate::Cursor
 //! [`cursors`]: crate::Cursor
 //! [`callback`]: crate::node::Callbacks
@@ -630,9 +629,8 @@
 //! [`query`]: crate::node::Callbacks::query
 //! [creation]: crate::node::Callbacks::query
 //! [created]: crate::node::Callbacks::query
-//! [lazy_json]: https://github.com/mnmun/lazy_json
+//! [`lazy_json`]: https://github.com/mnmun/lazy_json
 //! [examples/demo.rs]: https://github.com/mnmun/lazy_tree/blob/main/examples/demo.rs
-//! [tokio]: tokio
 
 #![allow(dead_code)]
 #![deny(rustdoc::broken_intra_doc_links)]

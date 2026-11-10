@@ -2,9 +2,9 @@
 //!
 //! ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 //!
-//! Defines a [`tree`] - a wrapper around the [`link`] to the `root` [`node`]
-//! with the ability to [create] [`cursors`] for traversing hierarchical
-//! structure of lazily-created [`nodes`].
+//! Defines a [`tree`] - a wrapper around a [`NonNull`] pointer to the `root`
+//! [`node`] with the ability to [create] [`cursors`] for traversing
+//! hierarchical structure of lazily-created [`nodes`].
 //!
 //! ---
 //!
@@ -13,7 +13,7 @@
 //! [`node`]: crate::Node
 //! [`nodes`]: crate::Node
 //! [`tree`]: crate::Tree
-//! [`link`]: crate::node::Link
+//! [`NonNull`]: std::ptr::NonNull
 //! [create]: crate::Tree::cursor()
 //! [`cursors`]: crate::Cursor
 use std::{fmt, thread};
@@ -70,8 +70,8 @@ where
 ///
 /// ![](https://github.com/mnmun/images/blob/main/tree.png?raw=true)
 ///
-/// Holds a [`link`] to the `root` [`node`] and provides a [`cursor()`] method
-/// for creating new [`cursors`].
+/// Holds a [`NonNull`] pointer to the `root` [`node`] and provides a
+/// [`cursor()`] method for creating new [`cursors`].
 ///
 /// `Tree` implements the [`Sync`] and [`Send`] traits, which allow a single
 /// `tree` to be shared among multiple threads, as well as sent between
@@ -101,7 +101,6 @@ where
 /// [`module`]: crate::tree
 /// [`node`]: crate::Node
 /// [`nodes`]: crate::Node
-/// [`link`]: crate::node::Link
 /// [`cursor()`]: crate::Tree::cursor()
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
@@ -111,6 +110,7 @@ where
 /// [creation]: crate::node::Callbacks::query
 /// [`Sync`]: std::marker::Sync
 /// [`Send`]: std::marker::Send
+/// [`NonNull`]: std::ptr::NonNull
 pub struct Tree<Value, Error>
 where
     Value: Send + 'static,

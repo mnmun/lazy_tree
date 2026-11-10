@@ -7,9 +7,6 @@
 //! - [`Node`] - a structural unit of a [`tree`] that is created on an
 //!   as-needed basis using the [`query`] callback;
 //! - [`Builder`] - a configurable [`builder`] used to create a new [`node`];
-//! - [`Link`] - a [`non-null`] pointer to a [`tree`] [`node`], used to
-//!   establish a connection between a single parent [`node`] and multiple
-//!   child [`nodes`];
 //! - [`Callbacks`] - a trait that defines asynchronous callbacks for a
 //!   [`node`].
 //!
@@ -22,7 +19,6 @@
 //! [`tree`]: crate::Tree
 //! [`query`]: crate::node::Callbacks::query
 //! [`builder`]: crate::node::Builder
-//! [`non-null`]: NonNull
 use async_trait::async_trait;
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -39,14 +35,11 @@ use tokio::sync::MutexGuard;
 
 use getset::{Getters, MutGetters};
 
-// TODO make it private
 /// # [`NonNull`] pointer to a [`node`]
 ///
 /// ![](https://github.com/mnmun/images/blob/main/chain.png?raw=true)
 ///
 /// Connects a parent [`node`] and its child [`nodes`].
-///
-/// An internal type that does not need to be created manually.
 ///
 /// ---
 ///
@@ -56,7 +49,7 @@ use getset::{Getters, MutGetters};
 /// [`nodes`]: crate::Node
 /// [`module`]: crate::node
 #[repr(transparent)]
-pub struct Link<Value, Error>(NonNull<Node<Value, Error>>)
+pub(crate) struct Link<Value, Error>(NonNull<Node<Value, Error>>)
 where
     Value: Send + 'static,
     Error: Send + 'static;
@@ -157,20 +150,15 @@ where
 ///
 /// Can be created using the [`Builder::new()`] method, which accepts arguments:
 ///
-/// - `value` - a `value` stored in the resulting [`node`]. Accessible via a
-///   [`cursor`];
-/// - `total` - a [callback](crate::node::Callbacks::total) for the `total`
-///   number of child [`nodes`]. Calculates the `total` number of child
-///   [`nodes`] for the resulting [`node`];
-/// - `query` - a [callback](crate::node::Callbacks::query) to query a child
-///   [`node`] by `index`. Returns a [`builder`] for a new child [`node`],
-///   specified by `index`, for the resulting [`node`].
+/// - `value` - a `value` stored in the resulting [`node`]. Accessible via
+///   the [`cursor`];
+/// - `callbacks` - a unit struct that implements the [`Callbacks`] trait.
 ///
 /// ## Build
 ///
 /// There is no need to call the `build()` method manually - it is intentionally
 /// made private and is executed automatically after the [`query`] callback,
-/// with a correct [`link`] to the parent [`node`] passed in.
+/// with a correct [`NonNull`] pointer to the parent [`node`] passed in.
 ///
 /// ---
 ///
@@ -180,8 +168,9 @@ where
 /// [`nodes`]: crate::Node
 /// [`cursor`]: crate::Cursor
 /// [`builder`]: crate::node::Builder
-/// [`query`]: crate::node::Callbacks::query
-/// [`link`]: crate::node::Link
+/// [`NonNull`]: std::ptr::NonNull
+/// [`query`]: crate::node::Callbacks::query()
+/// [`Callbacks`]: crate::node::Callbacks
 #[derive(Getters, MutGetters)]
 pub struct Builder<Value, Error>
 where
@@ -306,12 +295,7 @@ where
     ///
     /// - `value` - a `value` stored in the resulting [`node`]. Accessible via
     ///   the [`cursor`];
-    /// - `total` - a [callback](crate::node::Callbacks::total) for the `total`
-    ///   number of child [`nodes`]. Calculates the `total` number of child
-    ///   [`nodes`] for the resulting [`node`];
-    /// - `query` - a [callback](crate::node::Callbacks::query) to query a child
-    ///   [`node`] by `index`. Returns a [`builder`] for a new child [`node`],
-    ///   specified by `index`, for the resulting [`node`].
+    /// - `callbacks` - a unit struct that implements the [`Callbacks`] trait.
     ///
     /// This `builder` is used in a [`tree`] creation via the [`Tree::new()`]
     /// method and as a return value for the [`query`] callback.
@@ -325,9 +309,9 @@ where
     /// [`cursor`]: crate::Cursor
     /// [`builder`]: crate::node::Builder
     /// [`query`]: crate::node::Callbacks::query
-    /// [`link`]: crate::node::Link
     /// [`tree`]: crate::Tree
     /// [`Tree::new()`]: crate::Tree::new()
+    /// [`Callbacks`]: crate::node::Callbacks
     pub fn new(
         value: impl Into<Value>,
         callbacks: impl Callbacks<Value, Error> + 'static,
@@ -401,17 +385,14 @@ where
 /// Structural unit of a [`tree`] that is created on an as-needed basis using
 /// the [`query`] callback.
 ///
-/// `Node` holds a `value` accessible via a [`cursor`], an optional [`link`] to
-/// a parent [`node`], [`links`] to child [`nodes`], and two [callbacks]:
+/// `Node` holds a `value` accessible via a [`cursor`], an optional [`NonNull`]
+/// pointer to a parent [`node`], [`NonNull`] pointers to child [`nodes`], and
+/// two [callbacks]:
 ///
 /// - `total` - calculates the `total` number of child [`nodes`] for this
 ///   [`node`];
 /// - `query` - returns a [`builder`] for a new child [`node`], specified by
 ///   `index`, for this [`node`].
-///
-/// `Nodes` are connected through [`links`] - [`non-null`] pointers to
-/// heap-allocated [`nodes`]. [`Links`] are used both to connect to an optional
-/// parent [`node`] and to connect to child [`nodes`].
 ///
 /// An important component of each [`node`] in the [`tree`] is an internal
 /// `in_use` counter, which indicates how many [`cursors`] are currently
@@ -439,17 +420,17 @@ where
 ///
 /// New [`node`] can be created using a [`builder`], however the `build()`
 /// method is intentionally kept private to prevent the creation of orphan
-/// [`nodes`] in cases where a [`link`] to a parent [`node`] might be forgotten.
+/// [`nodes`] in cases where a pointer to a parent [`node`] might be forgotten.
 /// Whenever a new [`node`] needs to be created, the functions accept configured
-/// [`builders`] and automatically assign the correct parent [`link`], see the
+/// [`builders`] and automatically assign the correct parent pointer, see the
 /// [`Tree::new()`] method and the [`query`] callback.
 ///
 /// ## Children
 ///
 /// Child [`nodes`] are stored in the `HashMap<usize, Link<Value, Error>>` after
 /// creation using the [`query`] callback. In the map the child [`node's`]
-/// ordinal `index` serves as the `key`, and the `value` is a [`link`] to a
-/// heap allocated child [`node`].
+/// ordinal `index` serves as the `key`, and the `value` is a [`NonNull`]
+/// pointer to a heap allocated child [`node`].
 ///
 /// ---
 ///
@@ -460,8 +441,6 @@ where
 /// [`query`]: crate::node::Callbacks::query
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
-/// [`link`]: crate::node::Link
-/// [`links`]: crate::node::Link
 /// [`node`]: crate::Node
 /// [`node's`]: crate::Node
 /// [`nodes`]: crate::Node
@@ -469,7 +448,7 @@ where
 /// [`total`]: crate::node::Callbacks::total
 /// [`builder`]: crate::node::Builder
 /// [`builders`]: crate::node::Builder
-/// [`non-null`]: std::ptr::NonNull
+/// [`NonNull`]: std::ptr::NonNull
 /// [`Tree::new()`]: crate::Tree::new()
 pub struct Node<Value, Error>
 where
@@ -631,7 +610,7 @@ where
             .collect()
     }
 
-    pub fn from_link<'a>(link: Link<Value, Error>) -> &'a Self {
+    pub(crate) fn from_link<'a>(link: Link<Value, Error>) -> &'a Self {
         unsafe { link.0.as_ref() }
     }
 }
@@ -802,7 +781,6 @@ where
     /// [`node`]: crate::Node
     /// [`node's`]: crate::Node
     /// [`nodes`]: crate::Node
-    /// [`link`]: crate::node::Link
     /// [`cursor`]: crate::Cursor
     /// [`builder`]: crate::node::Builder
     /// [`total`]: crate::node::Callbacks::total

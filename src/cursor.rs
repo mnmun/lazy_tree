@@ -96,7 +96,7 @@ pub enum Direction {
 ///
 /// `Cursor` holds:
 ///
-/// - [`link`] to the [`node`] it currently points;
+/// - [`NonNull`] pointer to the [`node`] it currently points;
 /// - [`path`] from the [`tree's`] `root` [`node`] to the [`node`] it currently
 ///   points to.
 ///
@@ -130,7 +130,6 @@ pub enum Direction {
 /// See the [`module`] documentation for more information.
 ///
 /// [`module`]: crate::cursor
-/// [`link`]: crate::node::Link
 /// [`node`]: crate::Node
 /// [`node's`]: crate::Node
 /// [`nodes`]: crate::Node
@@ -147,6 +146,7 @@ pub enum Direction {
 /// [`jump()`]: crate::Cursor::jump()
 /// [`direction`]: crate::cursor::Direction
 /// [creation]: crate::node::Callbacks::query
+/// [`NonNull`]: std::ptr::NonNull
 #[derive(Debug, Getters)]
 pub struct Cursor<'tree, Value, Error>
 where
@@ -212,19 +212,18 @@ where
 
 /// # Safety
 ///
-/// [`Cursor`] contains a raw [`non-null`] pointer to a [`node`] (in the form
-/// of a [`link`]); it is safe to pass between threads because the [`node`] the
-/// [`cursor`] points to cannot be deleted before the [`cursor`] itself, and the
-/// [`cursor`] cannot outlive the [`tree`] from which it was created.
+/// [`Cursor`] contains a [`NonNull`] pointer to a [`node`] but it is safe
+/// to pass between threads because the [`node`], the [`cursor`] points to,
+/// cannot be deleted before the [`cursor`] itself, and the [`cursor`] cannot
+/// outlive the [`tree`] from which it was created.
 ///
 /// ---
 ///
 /// See the [`cursor`] documentation for more information.
 ///
 /// [`cursor`]: crate::Cursor
-/// [`non-null`]: std::ptr::NonNull
+/// [`NonNull`]: std::ptr::NonNull
 /// [`node`]: crate::Node
-/// [`link`]: crate::node::Link
 /// [`tree`]: crate::Tree
 unsafe impl<'tree, Value, Error> Send for Cursor<'tree, Value, Error>
 where

@@ -2485,7 +2485,7 @@ mod tests {
         assert_eq!(cursor_5.content, "RRR");
         assert_children!(cursor_5.node().children(), &[]);
 
-        for _ in 0..10 {
+        for _ in 0..10000 {
             assert!(cursor_0.jump(Direction::Right).await.unwrap());
             assert!(cursor_0.jump(Direction::Right).await.unwrap());
             assert!(cursor_1.jump(Direction::Left).await.unwrap());
@@ -2534,7 +2534,7 @@ mod tests {
                 assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
                 assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
 
-                for _ in 0..4000 {
+                for _ in 0..10000 {
                     assert!(cursor_0.jump(Direction::Right).await.unwrap());
                     assert!(cursor_0.jump(Direction::Right).await.unwrap());
                     assert!(cursor_1.jump(Direction::Left).await.unwrap());
@@ -2553,7 +2553,7 @@ mod tests {
                 assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
                 assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
 
-                for _ in 0..2000 {
+                for _ in 0..10000 {
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
@@ -2576,7 +2576,7 @@ mod tests {
                 assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
                 assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
 
-                for _ in 0..1000 {
+                for _ in 0..10000 {
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
@@ -2627,7 +2627,7 @@ mod tests {
                         assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
                         assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
 
-                        for _ in 0..4000 {
+                        for _ in 0..10000 {
                             assert!(
                                 cursor_0.jump(Direction::Right).await.unwrap()
                             );
@@ -2661,7 +2661,7 @@ mod tests {
                         assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
                         assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
 
-                        for _ in 0..2000 {
+                        for _ in 0..10000 {
                             assert!(
                                 cursor_2.jump(Direction::Right).await.unwrap()
                             );
@@ -2707,7 +2707,7 @@ mod tests {
                         assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
                         assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
 
-                        for _ in 0..1000 {
+                        for _ in 0..10000 {
                             assert!(
                                 cursor_4.jump(Direction::Right).await.unwrap()
                             );

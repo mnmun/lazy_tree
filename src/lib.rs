@@ -2398,20 +2398,20 @@ mod tests {
         assert_eq!(cursor.path(), &[0]);
         assert_eq!(**cursor, "ROOT");
         assert_children!(cursor.node().children(), &[]);
-        assert_eq!(unsafe { cursor.link.as_ref().in_use() }, 1);
+        assert_eq!(unsafe { *cursor.link.as_ref().in_use().await }, 1);
         assert!(unsafe { cursor.link.as_ref().children().await.is_empty() });
         let root = Node::from_link(tree.root);
-        assert_eq!(root.in_use(), 1);
+        assert_eq!(*root.in_use().await, 1);
         assert!(root.children().await.is_empty());
 
         assert!(cursor.walk(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
         assert_eq!(**cursor, "L");
         assert_children!(cursor.node().children(), &[]);
-        assert_eq!(unsafe { cursor.link.as_ref().in_use() }, 1);
+        assert_eq!(unsafe { *cursor.link.as_ref().in_use().await }, 1);
         assert!(unsafe { cursor.link.as_ref().children().await.is_empty() });
         let root = Node::from_link(tree.root);
-        assert_eq!(root.in_use(), 1);
+        assert_eq!(*root.in_use().await, 1);
         assert!(!root.children().await.is_empty());
 
         drop(cursor);
@@ -2419,7 +2419,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         let root = Node::from_link(tree.root);
-        assert_eq!(root.in_use(), 0);
+        assert_eq!(*root.in_use().await, 0);
         assert!(root.children().await.is_empty());
     }
 

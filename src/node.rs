@@ -20,9 +20,6 @@
 //! [`query`]: crate::node::Callbacks::query
 //! [`builder`]: crate::node::Builder
 use async_trait::async_trait;
-#[cfg(test)]
-use tokio::sync::MutexGuard;
-
 use std::{
     collections::{HashMap, hash_map::Entry},
     fmt,
@@ -30,9 +27,11 @@ use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicUsize, Ordering},
 };
 use tokio::sync::Mutex;
+
+#[cfg(test)]
+use tokio::sync::MutexGuard;
 
 use getset::{Getters, MutGetters};
 
@@ -365,7 +364,7 @@ where
             children: Mutex::new(HashMap::new()),
             total: None,
 
-            in_use: AtomicUsize::new(0),
+            in_use: Mutex::new(0),
 
             value: self.value,
             callbacks: self.callbacks,
@@ -402,16 +401,16 @@ where
 /// within the same branch of the [`tree`].
 ///
 /// As soon as a [`cursor`] descends from a parent [`node`] to its child
-/// [`node`], the `in_use` counter for that child [`node`] is atomically
-/// **incremented** by one. If this is the first [`cursor`] to descend into
-/// this [`node`] (the `in_use` counter value before incrementing is equal to
-/// zero), then the [`total`] callback is called for the child [`node`] before
-/// incrementing the counter.
+/// [`node`], the `in_use` counter for that child [`node`] is **incremented** by
+/// one. If this is the first [`cursor`] to descend into this [`node`] (the
+/// `in_use` counter value before incrementing is equal to zero), then the
+/// [`total`] callback is called for the child [`node`] before incrementing the
+/// counter.
 ///
 /// As the [`cursor`] ascends from a child [`node`] to its parent [`node`], the
-/// child [`node's`] `in_use` counter is atomically **decremented** by one. If
-/// this is the last [`cursor`] that was using the child [`node`] (the `in_use`
-/// counter value became zero after decrementing), then this child [`node`] is
+/// child [`node's`] `in_use` counter is **decremented** by one. If this is the
+/// last [`cursor`] that was using the child [`node`] (the `in_use` counter
+/// value became zero after decrementing), then this child [`node`] is
 /// automatically deleted.
 ///
 /// Thus, at any given moment, there exists a continuous sequence of [`nodes`]
@@ -460,7 +459,7 @@ where
     pub(crate) children: Mutex<HashMap<usize, Link<Value, Error>>>,
     pub(crate) total: Option<usize>,
 
-    pub(crate) in_use: AtomicUsize,
+    pub(crate) in_use: Mutex<usize>,
 
     pub(crate) value: Value,
     pub(crate) callbacks: Box<dyn Callbacks<Value, Error>>,
@@ -495,8 +494,8 @@ where
     /// This method first checks the current value of the [`node's`] `in_use`
     /// counter. If the counter value is zero, the [`total`] callback is invoked
     /// for this [`node`]. Regardless of the current `in_use` value, it is
-    /// atomically **incremented** by one to indicate that a new [`cursor`] is
-    /// now using this [`node`].
+    /// **incremented** by one to indicate that a new [`cursor`] is now using
+    /// this [`node`].
     ///
     /// The antagonist method is the [`leave()`] method.
     ///
@@ -518,15 +517,13 @@ where
     /// [`total`]: crate::node::Callbacks::total
     /// [`leave()`]: crate::Node::leave()
     pub(crate) async fn enter(&mut self) -> Result<(), Error> {
-        let prev = self.in_use.fetch_add(1, Ordering::Relaxed);
+        let mut in_use = self.in_use.lock().await;
 
-        if prev == isize::MAX as usize {
-            panic!("Too many cursors!");
-        }
-
-        if prev == 0 {
+        if *in_use == 0 {
             self.total = Some(self.callbacks.total(&mut self.value).await?);
         }
+
+        *in_use += 1;
 
         Ok(())
     }
@@ -536,9 +533,9 @@ where
     /// Automatically called when the [`cursor`] is moved from this child
     /// [`node`] to its parent [`node`], see the [`Cursor::up()`] method.
     ///
-    /// This method atomically **decrements** the `in_use` counter of this child
-    /// [`node`] by one. If the counter value reaches zero, all of this child
-    /// [`node's`] own child [`nodes`] are deleted.
+    /// This method **decrements** the `in_use` counter of this child [`node`]
+    /// by one. If the counter value reaches zero, all of this child [`node's`]
+    /// own child [`nodes`] are deleted.
     ///
     /// The antagonist method is the [`enter()`] method.
     ///
@@ -554,14 +551,13 @@ where
     /// [`Cursor::up()`]: crate::Cursor::up()
     /// [`enter()`]: crate::Node::enter()
     pub(crate) async fn leave(&mut self) {
-        if self
-            .in_use
-            .try_update(Ordering::Release, Ordering::Relaxed, |in_use| {
-                in_use.checked_sub(1)
-            })
-            .expect("`in_use` counter could not be zero at this point!")
-            == 1
-        {
+        let mut in_use = self.in_use.lock().await;
+
+        *in_use = in_use
+            .checked_sub(1)
+            .expect("`in_use` counter could not be zero at this point");
+
+        if *in_use == 0 {
             let mut children = self.children.lock().await;
 
             for (_, child) in mem::take(&mut *children) {
@@ -588,8 +584,7 @@ where
         let mut children = self.children.lock().await;
 
         if let Entry::Occupied(entry) = children.entry(index)
-            && unsafe { entry.get().0.as_ref().in_use.load(Ordering::Acquire) }
-                == 0
+            && *unsafe { entry.get().0.as_ref().in_use.lock().await } == 0
         {
             drop_link(entry.remove()).await;
         }
@@ -602,8 +597,8 @@ where
     Value: Send + 'static,
     Error: Send + 'static,
 {
-    pub(crate) fn in_use(&self) -> usize {
-        self.in_use.load(Ordering::Relaxed)
+    pub(crate) async fn in_use(&self) -> MutexGuard<'_, usize> {
+        self.in_use.lock().await
     }
 
     pub(crate) async fn children(

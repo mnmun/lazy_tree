@@ -519,7 +519,7 @@ where
     pub(crate) async fn enter(&mut self) -> Result<(), Error> {
         let mut in_use = self.in_use.lock().await;
 
-        if *in_use == 0 {
+        if *in_use == 0 && self.total.is_none() {
             self.total = Some(self.callbacks.total(&mut self.value).await?);
         }
 

@@ -729,6 +729,7 @@ mod tests {
         ) -> Self {
             Self {
                 content,
+
                 source,
                 left_child_index,
             }

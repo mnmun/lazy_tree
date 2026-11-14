@@ -30,10 +30,10 @@ use std::{
 
 use async_trait::async_trait;
 use getset::{Getters, MutGetters};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 #[cfg(test)]
-use tokio::sync::MutexGuard;
+use tokio::sync::{MutexGuard, RwLockReadGuard};
 
 /// # [`NonNull`] pointer to a [`node`]
 ///
@@ -120,6 +120,22 @@ where
     Error: Send + 'static,
 {
 }
+/// # Safety
+///
+/// A reference to a [`link`] can be safely shared among threads due to the
+/// constraints imposed on `Value` and `Error`: `Send + Sync + 'static`.
+///
+/// ---
+///
+/// See the [`link`] documentation for more information.
+///
+/// [`link`]: crate::node::Link
+unsafe impl<Value, Error> Sync for Link<Value, Error>
+where
+    Value: Send + Sync + 'static,
+    Error: Send + Sync + 'static,
+{
+}
 
 /// # Deallocates the subtree rooted at the [`link`]
 ///
@@ -136,7 +152,7 @@ where
     while let Some(mut node) = delete_queue.pop() {
         let node = unsafe { Box::from_raw(node.as_mut()) };
 
-        let mut children = node.children.lock().await;
+        let mut children = node.children.write().await;
 
         delete_queue.extend(mem::take(&mut *children).values());
     }
@@ -361,7 +377,7 @@ where
 
         let node = Node {
             parent: self.parent,
-            children: Mutex::new(HashMap::new()),
+            children: RwLock::new(HashMap::new()),
             total: None,
 
             in_use: Mutex::new(0),
@@ -456,7 +472,7 @@ where
     Error: Send + 'static,
 {
     pub(crate) parent: Option<Link<Value, Error>>,
-    pub(crate) children: Mutex<HashMap<usize, Link<Value, Error>>>,
+    pub(crate) children: RwLock<HashMap<usize, Link<Value, Error>>>,
     pub(crate) total: Option<usize>,
 
     pub(crate) in_use: Mutex<usize>,
@@ -558,7 +574,7 @@ where
             .expect("`in_use` counter could not be zero at this point");
 
         if *in_use == 0 {
-            let mut children = self.children.lock().await;
+            let mut children = self.children.write().await;
 
             for (_, child) in mem::take(&mut *children) {
                 drop_link(child).await;
@@ -581,7 +597,7 @@ where
     /// [`cursor`]: crate::Cursor
     /// [`Cursor::up()`]: crate::Cursor::up()
     pub(crate) async fn cleanup(&mut self, index: usize) {
-        let mut children = self.children.lock().await;
+        let mut children = self.children.write().await;
 
         if let Entry::Occupied(entry) = children.entry(index)
             && *unsafe { entry.get().0.as_ref().in_use.lock().await } == 0
@@ -603,8 +619,8 @@ where
 
     pub(crate) async fn children(
         &self,
-    ) -> MutexGuard<'_, HashMap<usize, Link<Value, Error>>> {
-        self.children.lock().await
+    ) -> RwLockReadGuard<'_, HashMap<usize, Link<Value, Error>>> {
+        self.children.read().await
     }
 
     pub(crate) fn from_link<'a>(link: Link<Value, Error>) -> &'a Self {

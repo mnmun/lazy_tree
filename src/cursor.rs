@@ -23,7 +23,10 @@ use std::{marker::PhantomData, mem, ops::Deref};
 use getset::Getters;
 use tokio::sync::mpsc;
 
-use crate::{node::Link, tree::Cleaning};
+use crate::{
+    node::{Link, drop_link},
+    tree::Cleaning,
+};
 
 #[cfg(test)]
 use crate::Node;
@@ -684,12 +687,16 @@ where
                 return Ok(false);
             }
 
-            let mut children = self.link.as_ref().children.lock().await;
+            if let Some(node) =
+                self.link.as_ref().children.read().await.get(&index)
+            {
+                let mut node = *node;
 
-            let mut node = if let Some(node) = children.get(&index) {
-                *node
+                node.as_mut().enter().await?;
+                self.link = node;
+                self.path.push(index);
             } else {
-                let node = self
+                let mut new_node = self
                     .link
                     .as_ref()
                     .callbacks
@@ -698,13 +705,24 @@ where
                     .with_parent(self.link)
                     .build();
 
-                children.insert(index, node);
-                *children.get(&index).unwrap()
-            };
+                let mut guard = self.link.as_ref().children.write().await;
 
-            node.as_mut().enter().await?;
-            self.link = node;
-            self.path.push(index);
+                if let Some(node) = guard.get(&index) {
+                    drop_link(new_node).await;
+
+                    let mut node = *node;
+
+                    node.as_mut().enter().await?;
+                    self.link = node;
+                    self.path.push(index);
+                } else {
+                    new_node.as_mut().enter().await?;
+                    self.link = new_node;
+                    self.path.push(index);
+
+                    guard.insert(index, new_node);
+                }
+            }
 
             Ok(true)
         }

@@ -114,9 +114,9 @@ pub enum Direction {
 /// Use the [`Tree::cursor()`] method to create a new `cursor` pointing to the
 /// [`tree's`] `root` [`node`] with the [`path`] set to `[0]`.
 ///
-/// [`Tree`] can have multiple `cursors` at the same time. `Cursors` implement
-/// the [`Send`] trait, so they can be sent between threads safely. Each
-/// `cursor` remains borrowed from its [`tree`] and cannot outlive it.
+/// [`Tree`] can have multiple `cursors` at the same time, pointing to
+/// different [`nodes`] and moving independently of each other. Each `cursor`
+/// remains borrowed from its [`tree`] and cannot outlive it.
 ///
 /// ## Traversing
 ///
@@ -151,11 +151,7 @@ pub enum Direction {
 /// [creation]: crate::node::Callbacks::query
 /// [`NonNull`]: std::ptr::NonNull
 #[derive(Debug, Getters)]
-pub struct Cursor<'tree, Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub struct Cursor<'tree, Value, Error> {
     /// # [`Link`] to the [`node`] the [`cursor`] is currently pointing to
     ///
     /// See the [`cursor`] documentation for more information.
@@ -213,33 +209,7 @@ where
     _marker: PhantomData<&'tree ()>,
 }
 
-/// # Safety
-///
-/// [`Cursor`] contains a [`NonNull`] pointer to a [`node`] but it is safe
-/// to pass between threads because the [`node`], the [`cursor`] points to,
-/// cannot be deleted before the [`cursor`] itself, and the [`cursor`] cannot
-/// outlive the [`tree`] from which it was created.
-///
-/// ---
-///
-/// See the [`cursor`] documentation for more information.
-///
-/// [`cursor`]: crate::Cursor
-/// [`NonNull`]: std::ptr::NonNull
-/// [`node`]: crate::Node
-/// [`tree`]: crate::Tree
-unsafe impl<'tree, Value, Error> Send for Cursor<'tree, Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
-}
-
-impl<'tree, Value, Error> Drop for Cursor<'tree, Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Drop for Cursor<'_, Value, Error> {
     /// # Leaves all its [`nodes`]
     ///
     /// The [`cursor`] returns to the `root` [`node`] and then leaves it.
@@ -262,11 +232,7 @@ where
     }
 }
 
-impl<'tree, Value, Error> Deref for Cursor<'tree, Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Deref for Cursor<'_, Value, Error> {
     type Target = Value;
 
     fn deref(&self) -> &Self::Target {
@@ -289,11 +255,7 @@ fn vec_equ<T: PartialEq>(a: &[T], b: &[T]) -> Option<usize> {
         .find_map(|(i, (x, y))| if x != y { Some(i) } else { None })
 }
 
-impl<'tree, Value, Error> Cursor<'tree, Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Cursor<'_, Value, Error> {
     /// # Creates a [`cursor`] pointed to the [`link`] with the given `path`
     ///
     /// Calls the [`enter()`] method for the [`node`], a [`link`] to which
@@ -987,11 +949,7 @@ where
 }
 
 #[cfg(test)]
-impl<Value, Error> Cursor<'_, Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Cursor<'_, Value, Error> {
     pub fn node(&self) -> &Node<Value, Error> {
         unsafe { self.link.as_ref() }
     }

@@ -49,43 +49,23 @@ use tokio::sync::{MutexGuard, RwLockReadGuard};
 /// [`nodes`]: crate::Node
 /// [`module`]: crate::node
 #[repr(transparent)]
-pub(crate) struct Link<Value, Error>(NonNull<Node<Value, Error>>)
-where
-    Value: Send + 'static,
-    Error: Send + 'static;
+pub(crate) struct Link<Value, Error>(NonNull<Node<Value, Error>>);
 
-impl<Value, Error> fmt::Debug for Link<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> fmt::Debug for Link<Value, Error> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Link").field("pointer", &self.0).finish()
     }
 }
 
-impl<Value, Error> Clone for Link<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Clone for Link<Value, Error> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<Value, Error> Copy for Link<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
-}
+impl<Value, Error> Copy for Link<Value, Error> {}
 
-impl<Value, Error> Deref for Link<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Deref for Link<Value, Error> {
     type Target = NonNull<Node<Value, Error>>;
 
     fn deref(&self) -> &Self::Target {
@@ -93,11 +73,7 @@ where
     }
 }
 
-impl<Value, Error> DerefMut for Link<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> DerefMut for Link<Value, Error> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -105,8 +81,8 @@ where
 
 /// # Safety
 ///
-/// [`Link`] can be safely sent between threads due to the constraints imposed
-/// on `Value` and `Error`: `Send + 'static`.
+/// [`Link`] can be safely sent between threads due to the `Value` and `Error`
+/// bounds: `Send + 'static`.
 ///
 /// ---
 ///
@@ -116,14 +92,14 @@ where
 /// [`link`]: crate::node::Link
 unsafe impl<Value, Error> Send for Link<Value, Error>
 where
-    Value: Send + 'static,
-    Error: Send + 'static,
+    Value: Send,
+    Error: Send,
 {
 }
 /// # Safety
 ///
 /// A reference to a [`link`] can be safely shared among threads due to the
-/// constraints imposed on `Value` and `Error`: `Send + Sync + 'static`.
+/// `Value` and `Error` bounds: `Send + Sync + 'static`.
 ///
 /// ---
 ///
@@ -132,8 +108,8 @@ where
 /// [`link`]: crate::node::Link
 unsafe impl<Value, Error> Sync for Link<Value, Error>
 where
-    Value: Send + Sync + 'static,
-    Error: Send + Sync + 'static,
+    Value: Sync,
+    Error: Sync,
 {
 }
 
@@ -143,11 +119,7 @@ where
 ///
 /// [`link`]: crate::node::Link
 /// [`node`]: crate::Node
-pub(crate) async fn drop_link<Value, Error>(link: Link<Value, Error>)
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub(crate) async fn drop_link<Value, Error>(link: Link<Value, Error>) {
     let mut delete_queue = vec![link];
     while let Some(mut node) = delete_queue.pop() {
         let node = unsafe { Box::from_raw(node.as_mut()) };
@@ -188,11 +160,7 @@ where
 /// [`query`]: crate::node::Callbacks::query()
 /// [`Callbacks`]: crate::node::Callbacks
 #[derive(Getters, MutGetters)]
-pub struct Builder<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub struct Builder<Value, Error> {
     /// # Optional [`link`] to the parent [`node`]
     ///
     /// Methods for setting a [`link`] to the parent [`node`] are intentionally
@@ -233,8 +201,7 @@ where
 
 impl<Value, Error> fmt::Debug for Builder<Value, Error>
 where
-    Value: Send + 'static + fmt::Debug,
-    Error: Send + 'static,
+    Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Builder")
@@ -244,11 +211,7 @@ where
     }
 }
 
-impl<Value, Error> Builder<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Builder<Value, Error> {
     /// # Optional [`link`] to the parent [`node`]
     ///
     /// Methods for setting a [`link`] to the parent [`node`] are intentionally
@@ -274,11 +237,7 @@ where
     }
 }
 
-impl<Value, Error> Builder<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Builder<Value, Error> {
     /// # Optional [`link`] to the parent [`node`]
     ///
     /// [`Node`] without a parent is considered `root` and requires manual
@@ -300,11 +259,7 @@ where
     }
 }
 
-impl<Value, Error> Builder<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Builder<Value, Error> {
     /// # Creates a new [`node`] `builder`
     ///
     /// Arguments:
@@ -466,11 +421,7 @@ where
 /// [`builders`]: crate::node::Builder
 /// [`NonNull`]: std::ptr::NonNull
 /// [`Tree::new()`]: crate::Tree::new()
-pub struct Node<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub struct Node<Value, Error> {
     pub(crate) parent: Option<Link<Value, Error>>,
     pub(crate) children: RwLock<HashMap<usize, Link<Value, Error>>>,
     pub(crate) total: Option<usize>,
@@ -483,8 +434,7 @@ where
 
 impl<Value, Error> fmt::Debug for Node<Value, Error>
 where
-    Value: Send + 'static + fmt::Debug,
-    Error: Send + 'static,
+    Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Node")
@@ -497,11 +447,7 @@ where
     }
 }
 
-impl<Value, Error> Node<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Node<Value, Error> {
     /// # [`Cursor`] descends from the parent [`node`] to this child [`node`]
     ///
     /// Automatically called when the [`cursor`] moves from the parent [`node`]
@@ -608,11 +554,7 @@ where
 }
 
 #[cfg(test)]
-impl<Value, Error> Node<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Node<Value, Error> {
     pub(crate) async fn in_use(&self) -> MutexGuard<'_, usize> {
         self.in_use.lock().await
     }
@@ -628,11 +570,7 @@ where
     }
 }
 
-impl<Value, Error> Drop for Node<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Drop for Node<Value, Error> {
     fn drop(&mut self) {
         #[cfg(test)]
         {
@@ -738,11 +676,7 @@ where
 /// [`query`]: crate::node::Callbacks::query
 /// [`async_trait`]: mod@async_trait
 #[async_trait]
-pub trait Callbacks<Value, Error>: Send + Sync
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub trait Callbacks<Value, Error>: Send + Sync {
     /// # `Callback` for the `total` number of child [`nodes`]
     ///
     /// Calculates the `total` number of child [`nodes`] for the [`node`] that

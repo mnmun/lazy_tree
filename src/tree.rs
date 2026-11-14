@@ -54,11 +54,7 @@ pub(crate) static NODES_ALIVE: AtomicUsize = AtomicUsize::new(0);
 /// # Asynchronous task kinds
 ///
 /// See the [`Tree::new()`] method documentation for more information.
-pub(crate) enum Cleaning<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub(crate) enum Cleaning<Value, Error> {
     Park {
         link: Link<Value, Error>,
         path: Vec<usize>,
@@ -74,10 +70,6 @@ where
 /// Holds a [`NonNull`] pointer to the `root` [`node`] and provides a
 /// [`cursor()`] method for creating new [`cursors`].
 ///
-/// `Tree` implements the [`Sync`] and [`Send`] traits, which allow a single
-/// `tree` to be shared among multiple threads, as well as sent between
-/// threads.
-///
 /// ## Creation
 ///
 /// Can be created using the [`Tree::new()`] method, which takes the `root`
@@ -91,9 +83,8 @@ where
 /// stored in the [`node`] it currently points to.
 ///
 /// `Tree` may have multiple [`cursors`] at the same time, pointing to
-/// different [`nodes`] and moving independently of each other. [`Cursors`]
-/// implement the [`Send`] trait, so they can be sent between threads safely.
-/// Each [`cursor`] remains borrowed from its `tree` and cannot outlive it.
+/// different [`nodes`] and moving independently of each other. Each [`cursor`]
+/// remains borrowed from its `tree` and cannot outlive it.
 ///
 /// ---
 ///
@@ -112,11 +103,7 @@ where
 /// [`Sync`]: std::marker::Sync
 /// [`Send`]: std::marker::Send
 /// [`NonNull`]: std::ptr::NonNull
-pub struct Tree<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+pub struct Tree<Value, Error> {
     /// # [`Link`] to the `root` [`node`]
     ///
     /// See the [`tree`] documentation for more information.
@@ -141,49 +128,7 @@ where
     cleaning: mpsc::UnboundedSender<Cleaning<Value, Error>>,
 }
 
-/// # Safety
-///
-/// [`Tree`] contains no elements that would prevent it from being shared
-/// among multiple threads.
-///
-/// ---
-///
-/// See the [`tree`] documentation for more information.
-///
-/// [`tree`]: crate::Tree
-/// [`Tree`]: crate::Tree
-unsafe impl<Value, Error> Sync for Tree<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
-}
-
-/// # Safety
-///
-/// [`Tree`] can be safely sent between threads, since the borrow checked
-/// ensures that the [`cursor`] cannot outlive the [`tree`] from which it was
-/// created.
-///
-/// ---
-///
-/// See the [`tree`] documentation for more information.
-///
-/// [`tree`]: crate::Tree
-/// [`Tree`]: crate::Tree
-/// [`cursor`]: crate::Cursor
-unsafe impl<Value, Error> Send for Tree<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
-}
-
-impl<Value, Error> fmt::Debug for Tree<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> fmt::Debug for Tree<Value, Error> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tree")
             .field("root", &self.root)
@@ -279,11 +224,7 @@ where
 ///
 /// [`tree`]: crate::Tree
 /// [`nodes`]: crate::Node
-impl<Value, Error> Drop for Tree<Value, Error>
-where
-    Value: Send + 'static,
-    Error: Send + 'static,
-{
+impl<Value, Error> Drop for Tree<Value, Error> {
     fn drop(&mut self) {
         let _ = self.cleaning.send(Cleaning::Drop(self.root));
         let _ = self.cleaning.send(Cleaning::Close);

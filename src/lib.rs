@@ -24,7 +24,8 @@
 //! It can move between [`nodes`] within the [`tree`] and provides access to
 //! the `value` stored in the [`node`] it currently points to. As it moves, the
 //! [`cursor`] triggers the [creation] of any [`nodes`] it need to access, as
-//! well as the deletion of [`nodes`] that are no longer in use.
+//! well as the deletion of [`nodes`] that are no longer in use. Each [`cursor`]
+//! remains borrowed from its [`tree`] and cannot outlive it.
 //!
 //! ## [`Callbacks`]
 //!

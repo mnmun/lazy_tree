@@ -14,7 +14,7 @@ Used in [`lazy_json`](https://github.com/mnmun/lazy_json).
 
 ![](https://github.com/mnmun/images/blob/main/index_left.png?raw=true)
 
-`Cursor` is a tool for traversing a `tree` of lazily-created `nodes`. It can move between `nodes` within the `tree` and provides access to the `value` stored in the `node` it currently points to. As it moves, the `cursor` triggers the creation of any `nodes` it need to access, as well as the deletion of `nodes` that are no longer in use.
+`Cursor` is a tool for traversing a `tree` of lazily-created `nodes`. It can move between `nodes` within the `tree` and provides access to the `value` stored in the `node` it currently points to. As it moves, the `cursor` triggers the creation of any `nodes` it need to access, as well as the deletion of `nodes` that are no longer in use. Each `cursor` remains borrowed from its `tree` and cannot outlive it.
 
 ## `Callbacks`
 

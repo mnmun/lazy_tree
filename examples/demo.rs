@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 use std::ops::Deref;
 
 use lazy_tree::{
-    Tree,
+    Cursor, Tree,
     cursor::{Direction, Target},
     node,
 };
@@ -61,7 +61,7 @@ impl node::Callbacks<Bundle, MyError> for MyCallbacks {
         //     return Err(MyError::TotalError);
         // }
 
-        let mut total = 0;
+        let mut total: usize = 0;
 
         if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
             total += 1;
@@ -84,7 +84,7 @@ impl node::Callbacks<Bundle, MyError> for MyCallbacks {
         //     return Err(MyError::TotalError);
         // }
 
-        let bundle = match (
+        let bundle: Bundle = match (
             parent
                 .source
                 .get(parent.left_child_index)
@@ -156,9 +156,9 @@ async fn main() {
         /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
     ];
 
-    let tree = make_tree(source);
+    let tree: Tree<Bundle, MyError> = make_tree(source);
 
-    let mut cursor = tree.cursor().await.unwrap();
+    let mut cursor: Cursor<'_, Bundle, MyError> = tree.cursor().await.unwrap();
     assert_eq!(cursor.path(), &[0]);
     assert_eq!(**cursor, "ROOT");
 

@@ -227,7 +227,7 @@
 //!         //     return Err(MyError::TotalError);
 //!         // }
 //!
-//!         let mut total = 0;
+//!         let mut total: usize = 0;
 //!
 //!         if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
 //!             total += 1;
@@ -250,7 +250,7 @@
 //!         //     return Err(MyError::TotalError);
 //!         // }
 //!
-//!         let bundle = match (
+//!         let bundle: Bundle = match (
 //!             parent
 //!                 .source
 //!                 .get(parent.left_child_index)
@@ -347,7 +347,7 @@
 //! #         //     return Err(MyError::TotalError);
 //! #         // }
 //! #
-//! #         let mut total = 0;
+//! #         let mut total: usize = 0;
 //! #
 //! #         if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
 //! #             total += 1;
@@ -370,7 +370,7 @@
 //! #         //     return Err(MyError::TotalError);
 //! #         // }
 //! #
-//! #         let bundle = match (
+//! #         let bundle: Bundle = match (
 //! #             parent
 //! #                 .source
 //! #                 .get(parent.left_child_index)
@@ -429,10 +429,10 @@
 //! # use pretty_assertions::assert_eq;
 //! #
 //! # use lazy_tree::{
-//! #     Tree,
-//! #     node,
+//! #     Cursor, Tree,
 //! #     cursor::{Direction, Target},
 //! #     async_trait,
+//! #     node,
 //! # };
 //! #
 //! # // `Value` stored in each node
@@ -485,7 +485,7 @@
 //! #         //     return Err(MyError::TotalError);
 //! #         // }
 //! #
-//! #         let mut total = 0;
+//! #         let mut total: usize = 0;
 //! #
 //! #         if let Some(Some(_)) = parent.source.get(parent.left_child_index) {
 //! #             total += 1;
@@ -508,7 +508,7 @@
 //! #         //     return Err(MyError::TotalError);
 //! #         // }
 //! #
-//! #         let bundle = match (
+//! #         let bundle: Bundle = match (
 //! #             parent
 //! #                 .source
 //! #                 .get(parent.left_child_index)
@@ -581,9 +581,9 @@
 //!     /* [0, 0, 0, 1] */ None, // LEFT-LEFT-RIGHT
 //! ];
 //!
-//! let tree = make_tree(source);
+//! let tree: Tree<Bundle, MyError> = make_tree(source);
 //!
-//! let mut cursor = tree.cursor().await.unwrap();
+//! let mut cursor: Cursor<'_, Bundle, MyError> = tree.cursor().await.unwrap();
 //! assert_eq!(cursor.path(), &[0]);
 //! assert_eq!(**cursor, "ROOT");
 //!

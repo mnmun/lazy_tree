@@ -21,7 +21,7 @@ use std::{fmt, thread};
 use tokio::sync::mpsc;
 
 use crate::{
-    Cursor,
+    Cursor, Node,
     node::{self, Link, drop_link},
 };
 
@@ -79,7 +79,7 @@ pub(crate) enum Cleaning<Value, Error> {
 ///
 /// Traversing a `tree` of lazily-created [`nodes`] is performed using
 /// [`cursors`], which move between [`nodes`] and trigger the [creation] and
-/// deletion of `tree` [`nodes`]. A [`cursor`] provides access to the `value`
+/// deletion of `tree` [`nodes`]. A [`cursor`] provides access to the [`value`]
 /// stored in the [`node`] it currently points to.
 ///
 /// `Tree` may have multiple [`cursors`] at the same time, pointing to
@@ -97,6 +97,7 @@ pub(crate) enum Cleaning<Value, Error> {
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
 /// [`Cursors`]: crate::Cursor
+/// [`value`]: crate::Node::value()
 /// [`Tree::new()`]: crate::Tree::new()
 /// [`builder`]: crate::node::Builder
 /// [creation]: crate::node::Callbacks::query
@@ -156,17 +157,19 @@ where
             futures_lite::future::block_on(async move {
                 while let Some(message) = receiver.recv().await {
                     match message {
-                        Cleaning::Park { mut link, mut path } => unsafe {
-                            while let Some(parent) = link.as_ref().parent {
-                                link.as_mut().leave().await;
+                        Cleaning::Park { mut link, mut path } => {
+                            while let Some(parent) =
+                                Node::from_link(link).parent
+                            {
+                                Node::from_link(link).leave().await;
                                 link = parent;
-                                link.as_mut()
+                                Node::from_link(link)
                                     .cleanup(path.pop().unwrap())
                                     .await;
                             }
 
-                            link.as_mut().leave().await;
-                        },
+                            Node::from_link(link).leave().await;
+                        }
                         Cleaning::Drop(link) => {
                             drop_link(link).await;
                         }

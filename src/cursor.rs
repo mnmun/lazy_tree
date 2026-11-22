@@ -24,12 +24,9 @@ use getset::Getters;
 use tokio::sync::mpsc;
 
 use crate::{
-    node::{Link, drop_link},
+    node::{Link, Node, drop_link},
     tree::Cleaning,
 };
-
-#[cfg(test)]
-use crate::Node;
 
 /// # Specifies which child [`cursor`] selects when moving down
 ///
@@ -103,8 +100,8 @@ pub enum Direction {
 /// - [`path`] from the [`tree's`] `root` [`node`] to the [`node`] it currently
 ///   points to.
 ///
-/// `Cursor` dereferences to a `&Value`, allowing direct access to the
-/// [`node's`] `value`.
+/// `Cursor` dereferences to a `&Node<Value, Error>`, allowing direct access to
+/// the [`node's`] methods.
 ///
 /// [`Path`] contains one zero-based child index for each passed level in the
 /// [`tree`]. Valid [`path`] could not be empty and should start with zero.
@@ -233,10 +230,10 @@ impl<Value, Error> Drop for Cursor<'_, Value, Error> {
 }
 
 impl<Value, Error> Deref for Cursor<'_, Value, Error> {
-    type Target = Value;
+    type Target = Node<Value, Error>;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &self.link.as_ref().value }
+        Node::from_link(self.link)
     }
 }
 
@@ -276,11 +273,11 @@ impl<Value, Error> Cursor<'_, Value, Error> {
     /// [`node`]: crate::Node
     /// [`total`]: crate::node::Callbacks::total
     pub(crate) async fn new(
-        mut link: Link<Value, Error>,
+        link: Link<Value, Error>,
         path: Vec<usize>,
         sender: mpsc::UnboundedSender<Cleaning<Value, Error>>,
     ) -> Result<Self, Error> {
-        unsafe { link.as_mut().enter().await? };
+        Node::from_link(link).enter().await?;
 
         Ok(Cursor {
             link,
@@ -301,8 +298,8 @@ impl<Value, Error> Cursor<'_, Value, Error> {
     /// [`cursor`]: crate::Cursor
     /// [`total`]: crate::node::Callbacks::total
     /// [`node`]: crate::Node
-    pub fn total(&self) -> Option<usize> {
-        unsafe { self.link.as_ref().total }
+    pub async fn total(&self) -> Option<usize> {
+        *Node::from_link(self.link).total.read().await
     }
 
     /// # Attempts to move the [`cursor`] by an absolute `path`
@@ -636,58 +633,53 @@ impl<Value, Error> Cursor<'_, Value, Error> {
     /// [`query`]: crate::node::Callbacks::query
     /// [`total`]: crate::node::Callbacks::total
     async fn down(&mut self, target: Target) -> Result<bool, Error> {
-        unsafe {
-            let total = self.link.as_ref().total.as_ref().unwrap();
+        let total = self.total().await.unwrap();
 
-            let index = match target {
-                Target::First => 0,
-                Target::Last => total.saturating_sub(1),
-                Target::Index(i) => i,
-            };
+        let index = match target {
+            Target::First => 0,
+            Target::Last => total.saturating_sub(1),
+            Target::Index(i) => i,
+        };
 
-            if index >= *total {
-                return Ok(false);
-            }
+        if index >= total {
+            return Ok(false);
+        }
 
-            if let Some(node) =
-                self.link.as_ref().children.read().await.get(&index)
-            {
-                let mut node = *node;
+        if let Some(link) =
+            Node::from_link(self.link).children.read().await.get(&index)
+        {
+            Node::from_link(*link).enter().await?;
+            self.link = *link;
+            self.path.push(index);
+        } else {
+            let new_link = Node::from_link(self.link)
+                .callbacks
+                .query(
+                    &mut *Node::from_link(self.link).value.write().await,
+                    index,
+                )
+                .await?
+                .with_parent(self.link)
+                .build();
 
-                node.as_mut().enter().await?;
-                self.link = node;
+            let mut guard = Node::from_link(self.link).children.write().await;
+
+            if let Some(link) = guard.get(&index) {
+                drop_link(new_link).await;
+
+                Node::from_link(*link).enter().await?;
+                self.link = *link;
                 self.path.push(index);
             } else {
-                let mut new_node = self
-                    .link
-                    .as_ref()
-                    .callbacks
-                    .query(&mut self.link.as_mut().value, index)
-                    .await?
-                    .with_parent(self.link)
-                    .build();
+                Node::from_link(new_link).enter().await?;
+                self.link = new_link;
+                self.path.push(index);
 
-                let mut guard = self.link.as_ref().children.write().await;
-
-                if let Some(node) = guard.get(&index) {
-                    drop_link(new_node).await;
-
-                    let mut node = *node;
-
-                    node.as_mut().enter().await?;
-                    self.link = node;
-                    self.path.push(index);
-                } else {
-                    new_node.as_mut().enter().await?;
-                    self.link = new_node;
-                    self.path.push(index);
-
-                    guard.insert(index, new_node);
-                }
+                guard.insert(index, new_link);
             }
-
-            Ok(true)
         }
+
+        Ok(true)
     }
 
     /// # Moves the [`cursor`] to the [`target`] child [`node`] or the [`tree`] `root`
@@ -732,14 +724,14 @@ impl<Value, Error> Cursor<'_, Value, Error> {
     /// [`query`]: crate::node::Callbacks::query
     /// [`total`]: crate::node::Callbacks::total
     async fn up(&mut self) -> bool {
-        unsafe {
-            if let Some(parent) = self.link.as_ref().parent {
-                self.link.as_mut().leave().await;
-                self.link = parent;
-                self.link.as_mut().cleanup(self.path.pop().unwrap()).await;
+        if let Some(parent) = Node::from_link(self.link).parent {
+            Node::from_link(self.link).leave().await;
+            self.link = parent;
+            Node::from_link(self.link)
+                .cleanup(self.path.pop().unwrap())
+                .await;
 
-                return true;
-            }
+            return true;
         }
 
         false
@@ -951,7 +943,7 @@ impl<Value, Error> Cursor<'_, Value, Error> {
 #[cfg(test)]
 impl<Value, Error> Cursor<'_, Value, Error> {
     pub fn node(&self) -> &Node<Value, Error> {
-        unsafe { self.link.as_ref() }
+        Node::from_link(self.link)
     }
 }
 

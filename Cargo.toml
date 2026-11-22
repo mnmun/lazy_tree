@@ -1,14 +1,14 @@
 [package]
 name = "lazy_tree"
 description = "tree of lazily-created nodes with asynchronous cursor-based traversal"
-version = "1.0.0"
+version = "2.0.0"
 authors = ["mnmun <mnmnmun@proton.me>"]
 homepage = "https://github.com/mnmun/lazy_tree"
 repository = "https://github.com/mnmun/lazy_tree"
 documentation = "https://docs.rs/lazy_tree/latest/lazy_tree/"
 readme = "README.md"
 keywords = ["lazy", "tree", "data-structures", "node", "hierarchy"]
-categories = ["data-structures"]
+categories = ["asynchronous", "data-structures"]
 exclude = ["diagram.png", "flake.nix", "flake.lock"]
 license = "MIT"
 edition = "2024"

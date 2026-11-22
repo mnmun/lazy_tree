@@ -82,7 +82,7 @@ impl<Value, Error> DerefMut for Link<Value, Error> {
 /// # Safety
 ///
 /// [`Link`] can be safely sent between threads due to the `Value` and `Error`
-/// bounds: `Send + 'static`.
+/// bounds: `Send`.
 ///
 /// ---
 ///
@@ -96,10 +96,11 @@ where
     Error: Send,
 {
 }
+
 /// # Safety
 ///
 /// A reference to a [`link`] can be safely shared among threads due to the
-/// `Value` and `Error` bounds: `Send + Sync + 'static`.
+/// `Value` and `Error` bounds: `Sync`.
 ///
 /// ---
 ///
@@ -139,7 +140,7 @@ pub(crate) async fn drop_link<Value, Error>(link: Link<Value, Error>) {
 /// Can be created using the [`Builder::new()`] method, which accepts arguments:
 ///
 /// - `value` - a `value` stored in the resulting [`node`]. Accessible via
-///   the [`cursor`];
+///   the [`value()`] method;
 /// - `callbacks` - a unit struct that implements the [`Callbacks`] trait.
 ///
 /// ## Build
@@ -154,7 +155,7 @@ pub(crate) async fn drop_link<Value, Error>(link: Link<Value, Error>) {
 ///
 /// [`node`]: crate::Node
 /// [`nodes`]: crate::Node
-/// [`cursor`]: crate::Cursor
+/// [`value()`]: crate::Node::value()
 /// [`builder`]: crate::node::Builder
 /// [`NonNull`]: std::ptr::NonNull
 /// [`query`]: crate::node::Callbacks::query()
@@ -265,7 +266,7 @@ impl<Value, Error> Builder<Value, Error> {
     /// Arguments:
     ///
     /// - `value` - a `value` stored in the resulting [`node`]. Accessible via
-    ///   the [`cursor`];
+    ///   the [`value()`] method;
     /// - `callbacks` - a unit struct that implements the [`Callbacks`] trait.
     ///
     /// This `builder` is used in a [`tree`] creation via the [`Tree::new()`]
@@ -277,7 +278,7 @@ impl<Value, Error> Builder<Value, Error> {
     ///
     /// [`node`]: crate::Node
     /// [`nodes`]: crate::Node
-    /// [`cursor`]: crate::Cursor
+    /// [`value()`]: crate::Node::value()
     /// [`builder`]: crate::node::Builder
     /// [`query`]: crate::node::Callbacks::query
     /// [`tree`]: crate::Tree
@@ -333,11 +334,11 @@ impl<Value, Error> Builder<Value, Error> {
         let node = Node {
             parent: self.parent,
             children: RwLock::new(HashMap::new()),
-            total: None,
+            total: RwLock::new(None),
 
             in_use: Mutex::new(0),
 
-            value: self.value,
+            value: RwLock::new(self.value),
             callbacks: self.callbacks,
         };
 
@@ -354,11 +355,12 @@ impl<Value, Error> Builder<Value, Error> {
 /// ![](https://github.com/mnmun/images/blob/main/cherry.png?raw=true)
 ///
 /// Structural unit of a [`tree`] that is created on an as-needed basis using
-/// the [`query`] callback.
+/// the [`query`] callback. To access `node` methods, you must use a [`cursor`]
+/// that implements the [`Deref`] trait for the `Node<Value, Error>` target.
 ///
-/// `Node` holds a `value` accessible via a [`cursor`], an optional [`NonNull`]
-/// pointer to a parent [`node`], [`NonNull`] pointers to child [`nodes`], and
-/// two [callbacks]:
+/// `Node` holds a `value` accessible via the [`value()`] method, an optional
+/// [`NonNull`] pointer to a parent [`node`], [`NonNull`] pointers to child
+/// [`nodes`], and two [callbacks]:
 ///
 /// - `total` - calculates the `total` number of child [`nodes`] for this
 ///   [`node`];
@@ -409,6 +411,7 @@ impl<Value, Error> Builder<Value, Error> {
 ///
 /// [`module`]: crate::node
 /// [`tree`]: crate::Tree
+/// [`value()`]: crate::Node::value()
 /// [`query`]: crate::node::Callbacks::query
 /// [`cursor`]: crate::Cursor
 /// [`cursors`]: crate::Cursor
@@ -424,11 +427,11 @@ impl<Value, Error> Builder<Value, Error> {
 pub struct Node<Value, Error> {
     pub(crate) parent: Option<Link<Value, Error>>,
     pub(crate) children: RwLock<HashMap<usize, Link<Value, Error>>>,
-    pub(crate) total: Option<usize>,
+    pub(crate) total: RwLock<Option<usize>>,
 
     pub(crate) in_use: Mutex<usize>,
 
-    pub(crate) value: Value,
+    pub(crate) value: RwLock<Value>,
     pub(crate) callbacks: Box<dyn Callbacks<Value, Error>>,
 }
 
@@ -444,6 +447,32 @@ where
             .field("in_use", &self.in_use)
             .field("value", &self.value)
             .finish_non_exhaustive()
+    }
+}
+
+impl<Value, Error> Node<Value, Error> {
+    /// # [`Node`] `value`
+    ///
+    /// Provides access to a `value` stored in a [`node`].
+    ///
+    /// Access to this method is provided by [`cursors`].
+    ///
+    /// ## Safety
+    ///
+    /// Be aware that this `value` is used when creating child [`nodes`] for
+    /// this parent [`node`], and holding a lock on this `value` may result in
+    /// a deadlock!
+    ///
+    /// ---
+    ///
+    /// See the [`node`] documentation for more information.
+    ///
+    /// [`node`]: crate::Node
+    /// [`Node`]: crate::Node
+    /// [`nodes`]: crate::Node
+    /// [`cursors`]: crate::Cursor
+    pub fn value(&self) -> &RwLock<Value> {
+        &self.value
     }
 }
 
@@ -478,11 +507,13 @@ impl<Value, Error> Node<Value, Error> {
     /// [`Cursor::down()`]: crate::Cursor::down()
     /// [`total`]: crate::node::Callbacks::total
     /// [`leave()`]: crate::Node::leave()
-    pub(crate) async fn enter(&mut self) -> Result<(), Error> {
+    pub(crate) async fn enter(&self) -> Result<(), Error> {
         let mut in_use = self.in_use.lock().await;
 
-        if *in_use == 0 && self.total.is_none() {
-            self.total = Some(self.callbacks.total(&mut self.value).await?);
+        if *in_use == 0 && self.total.read().await.is_none() {
+            *self.total.write().await = Some(
+                self.callbacks.total(&mut *self.value.write().await).await?,
+            );
         }
 
         *in_use += 1;
@@ -512,7 +543,7 @@ impl<Value, Error> Node<Value, Error> {
     /// [`Cursor`]: crate::Cursor
     /// [`Cursor::up()`]: crate::Cursor::up()
     /// [`enter()`]: crate::Node::enter()
-    pub(crate) async fn leave(&mut self) {
+    pub(crate) async fn leave(&self) {
         let mut in_use = self.in_use.lock().await;
 
         *in_use = in_use
@@ -542,14 +573,19 @@ impl<Value, Error> Node<Value, Error> {
     /// [`node`]: crate::Node
     /// [`cursor`]: crate::Cursor
     /// [`Cursor::up()`]: crate::Cursor::up()
-    pub(crate) async fn cleanup(&mut self, index: usize) {
+    pub(crate) async fn cleanup(&self, index: usize) {
         let mut children = self.children.write().await;
 
         if let Entry::Occupied(entry) = children.entry(index)
-            && *unsafe { entry.get().0.as_ref().in_use.lock().await } == 0
+            && *Node::from_link(*entry.get()).in_use.lock().await == 0
         {
             drop_link(entry.remove()).await;
         }
+    }
+
+    /// # A convenient wrapper around an `unsafe` `as_ref()` method
+    pub(crate) fn from_link<'a>(link: Link<Value, Error>) -> &'a Self {
+        unsafe { link.as_ref() }
     }
 }
 
@@ -563,10 +599,6 @@ impl<Value, Error> Node<Value, Error> {
         &self,
     ) -> RwLockReadGuard<'_, HashMap<usize, Link<Value, Error>>> {
         self.children.read().await
-    }
-
-    pub(crate) fn from_link<'a>(link: Link<Value, Error>) -> &'a Self {
-        unsafe { link.0.as_ref() }
     }
 }
 

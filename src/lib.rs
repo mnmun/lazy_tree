@@ -22,10 +22,10 @@
 //!
 //! [`Cursor`] is a tool for traversing a [`tree`] of lazily-created [`nodes`].
 //! It can move between [`nodes`] within the [`tree`] and provides access to
-//! the `value` stored in the [`node`] it currently points to. As it moves, the
-//! [`cursor`] triggers the [creation] of any [`nodes`] it need to access, as
-//! well as the deletion of [`nodes`] that are no longer in use. Each [`cursor`]
-//! remains borrowed from its [`tree`] and cannot outlive it.
+//! the [`value`] stored in the [`node`] it currently points to. As it moves,
+//! the [`cursor`] triggers the [creation] of any [`nodes`] it need to access,
+//! as well as the deletion of [`nodes`] that are no longer in use. Each
+//! [`cursor`] remains borrowed from its [`tree`] and cannot outlive it.
 //!
 //! ## [`Callbacks`]
 //!
@@ -45,12 +45,21 @@
 //!   a new child [`node`] only when access to that [`node`] is actually
 //!   required.
 //!
-//! When a [`cursor`] is created, the [`total`] `callback` is called on the `root`
-//! [`node`] as if the [`cursor`] had moved to it from the parent [`node`].
+//! When a [`cursor`] is created, the [`total`] `callback` is called on the
+//! `root` [`node`] as if the [`cursor`] had moved to it from its parent
+//! [`node`].
 //!
 //! In this way, a developer can define the logic for constructing a [`tree`] of
 //! lazily-created [`nodes`] tailored to their specific use case by implementing
 //! these [`callbacks`].
+//!
+//! ## Safety
+//!
+//! ![](https://github.com/mnmun/images/blob/main/slippery.png?raw=true)
+//!
+//! Low-level, pointer-based memory management is verified with [`Miri`], an
+//! interpreter that detects undefined behavior at runtime. Testing revealed no
+//! undefined behavior.
 //!
 //! ## Example
 //!
@@ -119,7 +128,8 @@
 //!     left_child_index: usize,
 //! }
 //!
-//! // The `content` field can be accessed via cursor dereferencing: `**cursor`
+//! // The `content` field can be accessed via the `value()` method:
+//! // `**cursor.value().read().await`
 //! impl Deref for Bundle {
 //!     type Target = &'static str;
 //!
@@ -188,7 +198,8 @@
 //! #     left_child_index: usize,
 //! # }
 //! #
-//! # // The `content` field can be accessed via cursor dereferencing: `**cursor`
+//! # // The `content` field can be accessed via the `value()` method:
+//! # // `**cursor.value().read().await`
 //! # impl Deref for Bundle {
 //! #     type Target = &'static str;
 //! #
@@ -308,7 +319,8 @@
 //! #     left_child_index: usize,
 //! # }
 //! #
-//! # // The `content` field can be accessed via cursor dereferencing: `**cursor`
+//! # // The `content` field can be accessed via the `value()` method:
+//! # // `**cursor.value().read().await`
 //! # impl Deref for Bundle {
 //! #     type Target = &'static str;
 //! #
@@ -446,7 +458,8 @@
 //! #     left_child_index: usize,
 //! # }
 //! #
-//! # // The `content` field can be accessed via cursor dereferencing: `**cursor`
+//! # // The `content` field can be accessed via the `value()` method:
+//! # // `**cursor.value().read().await`
 //! # impl Deref for Bundle {
 //! #     type Target = &'static str;
 //! #
@@ -586,19 +599,19 @@
 //!
 //! let mut cursor: Cursor<'_, Bundle, MyError> = tree.cursor().await.unwrap();
 //! assert_eq!(cursor.path(), &[0]);
-//! assert_eq!(**cursor, "ROOT");
+//! assert_eq!(**cursor.value().read().await, "ROOT");
 //!
 //! cursor.walk(Direction::Down(Target::First)).await.unwrap();
 //! assert_eq!(cursor.path(), &[0, 0]);
-//! assert_eq!(**cursor, "LEFT");
+//! assert_eq!(**cursor.value().read().await, "LEFT");
 //!
 //! cursor.walk(Direction::Right).await.unwrap();
 //! assert_eq!(cursor.path(), &[0, 1]);
-//! assert_eq!(**cursor, "RIGHT");
+//! assert_eq!(**cursor.value().read().await, "RIGHT");
 //!
 //! cursor.walk(Direction::Down(Target::First)).await.unwrap();
 //! assert_eq!(cursor.path(), &[0, 1, 0]);
-//! assert_eq!(**cursor, "RIGHT-RIGHT");
+//! assert_eq!(**cursor.value().read().await, "RIGHT-RIGHT");
 //! # }
 //! ```
 //!
@@ -623,6 +636,7 @@
 //! [`NonNull`]: std::ptr::NonNull
 //! [`cursor`]: crate::Cursor
 //! [`cursors`]: crate::Cursor
+//! [`value`]: crate::Node::value()
 //! [`callback`]: crate::node::Callbacks
 //! [`callbacks`]: crate::node::Callbacks
 //! [`Callbacks`]: crate::node::Callbacks
@@ -631,6 +645,7 @@
 //! [creation]: crate::node::Callbacks::query
 //! [created]: crate::node::Callbacks::query
 //! [`lazy_json`]: https://github.com/mnmun/lazy_json
+//! [`Miri`]: https://github.com/rust-lang/miri
 //! [examples/demo.rs]: https://github.com/mnmun/lazy_tree/blob/main/examples/demo.rs
 
 #![allow(dead_code)]
@@ -703,7 +718,7 @@ mod tests {
     use crate::{
         Node, Tree,
         cursor::{Direction, Target},
-        node::{self, Link},
+        node,
     };
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -813,20 +828,6 @@ mod tests {
             Bundle::new(source[0].unwrap(), source, 1),
             Callbacks,
         ))
-    }
-
-    macro_rules! assert_children {
-        ($left:expr, $right:expr) => {{
-            let left = $left.await;
-            let right = $right;
-
-            assert_eq!(left.len(), right.len());
-            left.values().zip(right.iter()).for_each(
-                |(left, right): (&Link<Bundle, ()>, &&str)| {
-                    assert_eq!(&Node::from_link(*left).value.content, right);
-                },
-            );
-        }};
     }
 
     /// ```plain
@@ -1045,48 +1046,48 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(**cursor, "RL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(**cursor, "RR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.go_to(&[0, 0, 0, 0, 0, 0, 0]).await.unwrap());
     }
@@ -1097,33 +1098,33 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.go_to(&[0, 0, 2]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.go_to(&[0, 1, 2]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.go_to(&[0, 3, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.go_to(&[3, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_up_from_root);
@@ -1134,13 +1135,13 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Up).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_up);
@@ -1151,18 +1152,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Up).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_up_from_root_in_empty_tree);
@@ -1171,13 +1172,13 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Up).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_down_from_leaf);
@@ -1188,33 +1189,33 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Down(Target::Last)).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1223,13 +1224,13 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1238,8 +1239,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_down);
@@ -1253,33 +1254,33 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Down(Target::Last)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1288,13 +1289,13 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1303,8 +1304,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_down_from_root_in_empty_tree);
@@ -1313,18 +1314,18 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Down(Target::Last)).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1333,8 +1334,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1343,8 +1344,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_up_from_root);
@@ -1355,13 +1356,13 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Up).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_up);
@@ -1372,18 +1373,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.walk(Direction::Up).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_up_from_root_in_empty_tree);
@@ -1392,13 +1393,13 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Up).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_down_from_leaf);
@@ -1409,18 +1410,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0, 0]);
-        assert_eq!(**cursor, "RLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RLL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_down);
@@ -1434,33 +1435,33 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.walk(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.walk(Direction::Down(Target::Last)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             cursor
@@ -1469,13 +1470,13 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             !cursor
@@ -1484,8 +1485,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_down_from_root_in_empty_tree);
@@ -1494,18 +1495,18 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Down(Target::Last)).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             !cursor
@@ -1514,8 +1515,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(
             !cursor
@@ -1524,8 +1525,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_across_tree_different_branch_same_depth);
@@ -1536,18 +1537,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(**cursor, "RR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_across_tree_same_branch_same_depth);
@@ -1558,18 +1559,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_across_tree_to_shorter_branch);
@@ -1580,18 +1581,18 @@ mod tests {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_across_tree_to_longer_branch);
@@ -1603,18 +1604,18 @@ mod tests {
         let mut cursor = tree.cursor().await.unwrap();
 
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_in_branch_same_depth);
@@ -1625,18 +1626,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_between_branches_to_shorter_branch);
@@ -1647,18 +1648,18 @@ mod tests {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_between_branches_to_longer_branch);
@@ -1669,18 +1670,18 @@ mod tests {
         let tree = binary_tree(BINARY_3);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_between_branches_same_depth);
@@ -1691,18 +1692,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(**cursor, "RL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_in_list);
@@ -1711,18 +1712,18 @@ mod tests {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_left_in_empty_tree);
@@ -1731,13 +1732,13 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_across_tree_different_branch_same_depth);
@@ -1748,18 +1749,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(**cursor, "RR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_across_tree_same_branch_same_depth);
@@ -1770,18 +1771,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_across_tree_to_shorter_branch);
@@ -1792,18 +1793,18 @@ mod tests {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_across_tree_to_longer_branch);
@@ -1814,18 +1815,18 @@ mod tests {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_in_branch_same_depth);
@@ -1836,18 +1837,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_between_branches_to_shorter_branch);
@@ -1858,18 +1859,18 @@ mod tests {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_between_branches_to_longer_branch);
@@ -1880,18 +1881,18 @@ mod tests {
         let tree = binary_tree(BINARY_4);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_between_branches_same_depth);
@@ -1902,18 +1903,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(**cursor, "RL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_in_list);
@@ -1922,18 +1923,18 @@ mod tests {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(jump_right_in_empty_tree);
@@ -1942,13 +1943,13 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.jump(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_across_tree_different_branch_same_depth);
@@ -1959,18 +1960,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_across_tree_same_branch_same_depth);
@@ -1981,18 +1982,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_across_tree_to_shorter_branch);
@@ -2003,18 +2004,18 @@ mod tests {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_across_tree_to_longer_branch);
@@ -2026,18 +2027,18 @@ mod tests {
         let mut cursor = tree.cursor().await.unwrap();
 
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_in_branch_same_depth);
@@ -2048,18 +2049,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_between_branches_to_shorter_branch);
@@ -2070,18 +2071,18 @@ mod tests {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_between_branches_to_longer_branch);
@@ -2092,18 +2093,18 @@ mod tests {
         let tree = binary_tree(BINARY_3);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_between_branches_same_depth);
@@ -2114,18 +2115,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(**cursor, "RL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 0]);
-        assert_eq!(**cursor, "RL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_in_list);
@@ -2134,18 +2135,18 @@ mod tests {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_left_in_empty_tree);
@@ -2154,13 +2155,13 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Left).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_across_tree_different_branch_same_depth);
@@ -2171,18 +2172,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(**cursor, "RR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1, 1]);
-        assert_eq!(**cursor, "RR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "RR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_across_tree_same_branch_same_depth);
@@ -2193,18 +2194,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_across_tree_to_shorter_branch);
@@ -2215,18 +2216,18 @@ mod tests {
         let tree = binary_tree(BINARY_1);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1, 0]);
-        assert_eq!(**cursor, "LRL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LRL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_across_tree_to_longer_branch);
@@ -2237,18 +2238,18 @@ mod tests {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_in_branch_same_depth);
@@ -2259,18 +2260,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 1]);
-        assert_eq!(**cursor, "R");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "R");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_between_branches_to_shorter_branch);
@@ -2281,18 +2282,18 @@ mod tests {
         let tree = binary_tree(BINARY_2);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_between_branches_to_longer_branch);
@@ -2303,18 +2304,18 @@ mod tests {
         let tree = binary_tree(BINARY_4);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0, 0]);
-        assert_eq!(**cursor, "LLL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LLL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_between_branches_same_depth);
@@ -2325,18 +2326,18 @@ mod tests {
         let tree = binary_tree(BINARY_0);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 1]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 1]);
-        assert_eq!(**cursor, "LR");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LR");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_in_list);
@@ -2345,18 +2346,18 @@ mod tests {
         let tree = binary_tree(LIST);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(cursor.go_to(&[0, 0, 0]).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0, 0]);
-        assert_eq!(**cursor, "LL");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "LL");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     runtime_test!(walk_right_in_empty_tree);
@@ -2365,13 +2366,13 @@ mod tests {
         let tree = binary_tree(EMPTY);
         let mut cursor = tree.cursor().await.unwrap();
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
 
         assert!(!cursor.walk(Direction::Right).await.unwrap());
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
     }
 
     #[tokio::test]
@@ -2382,20 +2383,20 @@ mod tests {
         let mut cursor = tree.cursor().await.unwrap();
 
         assert_eq!(cursor.path(), &[0]);
-        assert_eq!(**cursor, "ROOT");
-        assert_children!(cursor.node().children(), &[]);
-        assert_eq!(unsafe { *cursor.link.as_ref().in_use().await }, 1);
-        assert!(unsafe { cursor.link.as_ref().children().await.is_empty() });
+        assert_eq!(**cursor.value().read().await, "ROOT");
+        assert!(cursor.node().children().await.is_empty());
+        assert_eq!(*Node::from_link(cursor.link).in_use().await, 1);
+        assert!(Node::from_link(cursor.link).children().await.is_empty());
         let root = Node::from_link(tree.root);
         assert_eq!(*root.in_use().await, 1);
         assert!(root.children().await.is_empty());
 
         assert!(cursor.walk(Direction::Down(Target::First)).await.unwrap());
         assert_eq!(cursor.path(), &[0, 0]);
-        assert_eq!(**cursor, "L");
-        assert_children!(cursor.node().children(), &[]);
-        assert_eq!(unsafe { *cursor.link.as_ref().in_use().await }, 1);
-        assert!(unsafe { cursor.link.as_ref().children().await.is_empty() });
+        assert_eq!(**cursor.value().read().await, "L");
+        assert!(cursor.node().children().await.is_empty());
+        assert_eq!(*Node::from_link(cursor.link).in_use().await, 1);
+        assert!(Node::from_link(cursor.link).children().await.is_empty());
         let root = Node::from_link(tree.root);
         assert_eq!(*root.in_use().await, 1);
         assert!(!root.children().await.is_empty());
@@ -2412,63 +2413,64 @@ mod tests {
     runtime_test!(multiple_cursors_sequentially);
     /// Uses [`BINARY_FULL`]
     async fn multiple_cursors_sequentially() {
+        let amount = 10000;
         let tree = binary_tree(BINARY_FULL);
 
         let mut cursor_0 = tree.cursor().await.unwrap();
         assert_eq!(cursor_0.path(), &[0]);
-        assert_eq!(cursor_0.content, "ROOT");
-        assert_children!(cursor_0.node().children(), &[]);
+        assert_eq!(**cursor_0.value().read().await, "ROOT");
+        assert!(cursor_0.node().children().await.is_empty());
         let mut cursor_1 = tree.cursor().await.unwrap();
         assert_eq!(cursor_1.path(), &[0]);
-        assert_eq!(cursor_1.content, "ROOT");
-        assert_children!(cursor_1.node().children(), &[]);
+        assert_eq!(**cursor_1.value().read().await, "ROOT");
+        assert!(cursor_1.node().children().await.is_empty());
 
         let mut cursor_2 = tree.cursor().await.unwrap();
         assert_eq!(cursor_2.path(), &[0]);
-        assert_eq!(cursor_2.content, "ROOT");
-        assert_children!(cursor_2.node().children(), &[]);
+        assert_eq!(**cursor_2.value().read().await, "ROOT");
+        assert!(cursor_2.node().children().await.is_empty());
         let mut cursor_3 = tree.cursor().await.unwrap();
         assert_eq!(cursor_3.path(), &[0]);
-        assert_eq!(cursor_3.content, "ROOT");
-        assert_children!(cursor_3.node().children(), &[]);
+        assert_eq!(**cursor_3.value().read().await, "ROOT");
+        assert!(cursor_3.node().children().await.is_empty());
 
         let mut cursor_4 = tree.cursor().await.unwrap();
         assert_eq!(cursor_4.path(), &[0]);
-        assert_eq!(cursor_4.content, "ROOT");
-        assert_children!(cursor_4.node().children(), &[]);
+        assert_eq!(**cursor_4.value().read().await, "ROOT");
+        assert!(cursor_4.node().children().await.is_empty());
         let mut cursor_5 = tree.cursor().await.unwrap();
         assert_eq!(cursor_5.path(), &[0]);
-        assert_eq!(cursor_5.content, "ROOT");
-        assert_children!(cursor_5.node().children(), &[]);
+        assert_eq!(**cursor_5.value().read().await, "ROOT");
+        assert!(cursor_5.node().children().await.is_empty());
 
         assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
         assert_eq!(cursor_0.path(), &[0, 0]);
-        assert_eq!(cursor_0.content, "L");
-        assert_children!(cursor_0.node().children(), &[]);
+        assert_eq!(**cursor_0.value().read().await, "L");
+        assert!(cursor_0.node().children().await.is_empty());
         assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
         assert_eq!(cursor_1.path(), &[0, 1]);
-        assert_eq!(cursor_1.content, "R");
-        assert_children!(cursor_1.node().children(), &[]);
+        assert_eq!(**cursor_1.value().read().await, "R");
+        assert!(cursor_1.node().children().await.is_empty());
 
         assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
         assert_eq!(cursor_2.path(), &[0, 0, 0]);
-        assert_eq!(cursor_2.content, "LL");
-        assert_children!(cursor_2.node().children(), &[]);
+        assert_eq!(**cursor_2.value().read().await, "LL");
+        assert!(cursor_2.node().children().await.is_empty());
         assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
         assert_eq!(cursor_3.path(), &[0, 1, 1]);
-        assert_eq!(cursor_3.content, "RR");
-        assert_children!(cursor_3.node().children(), &[]);
+        assert_eq!(**cursor_3.value().read().await, "RR");
+        assert!(cursor_3.node().children().await.is_empty());
 
         assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
         assert_eq!(cursor_4.path(), &[0, 0, 0, 0]);
-        assert_eq!(cursor_4.content, "LLL");
-        assert_children!(cursor_4.node().children(), &[]);
+        assert_eq!(**cursor_4.value().read().await, "LLL");
+        assert!(cursor_4.node().children().await.is_empty());
         assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
         assert_eq!(cursor_5.path(), &[0, 1, 1, 1]);
-        assert_eq!(cursor_5.content, "RRR");
-        assert_children!(cursor_5.node().children(), &[]);
+        assert_eq!(**cursor_5.value().read().await, "RRR");
+        assert!(cursor_5.node().children().await.is_empty());
 
-        for _ in 0..10000 {
+        for _ in 0..amount {
             assert!(cursor_0.jump(Direction::Right).await.unwrap());
             assert!(cursor_0.jump(Direction::Right).await.unwrap());
             assert!(cursor_1.jump(Direction::Left).await.unwrap());
@@ -2505,6 +2507,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_cursors_concurrently() {
+        let amount = 10000;
         let tree = Arc::new(binary_tree(BINARY_FULL));
 
         let task_0 = tokio::spawn({
@@ -2517,7 +2520,7 @@ mod tests {
                 assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
                 assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
 
-                for _ in 0..10000 {
+                for _ in 0..amount {
                     assert!(cursor_0.jump(Direction::Right).await.unwrap());
                     assert!(cursor_0.jump(Direction::Right).await.unwrap());
                     assert!(cursor_1.jump(Direction::Left).await.unwrap());
@@ -2536,7 +2539,7 @@ mod tests {
                 assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
                 assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
 
-                for _ in 0..10000 {
+                for _ in 0..amount {
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
                     assert!(cursor_2.jump(Direction::Right).await.unwrap());
@@ -2559,7 +2562,7 @@ mod tests {
                 assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
                 assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
 
-                for _ in 0..10000 {
+                for _ in 0..amount {
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
                     assert!(cursor_4.jump(Direction::Right).await.unwrap());
@@ -2591,6 +2594,7 @@ mod tests {
     #[test]
     #[serial]
     fn multiple_cursors_parallel() {
+        let amount = 10000;
         let tree = Arc::new(binary_tree(BINARY_FULL));
 
         thread::scope(|scope| {
@@ -2610,7 +2614,7 @@ mod tests {
                         assert!(cursor_0.go_to(&[0, 0]).await.unwrap()); // ->
                         assert!(cursor_1.go_to(&[0, 1]).await.unwrap()); // <-
 
-                        for _ in 0..10000 {
+                        for _ in 0..amount {
                             assert!(
                                 cursor_0.jump(Direction::Right).await.unwrap()
                             );
@@ -2639,7 +2643,7 @@ mod tests {
                         assert!(cursor_2.go_to(&[0, 0, 0]).await.unwrap()); // ->
                         assert!(cursor_3.go_to(&[0, 1, 1]).await.unwrap()); // <-
 
-                        for _ in 0..10000 {
+                        for _ in 0..amount {
                             assert!(
                                 cursor_2.jump(Direction::Right).await.unwrap()
                             );
@@ -2673,14 +2677,14 @@ mod tests {
                 let tree = tree.clone();
 
                 move || {
-                    smol::block_on(async move {
+                    futures::executor::block_on(async move {
                         let mut cursor_4 = tree.cursor().await.unwrap();
                         let mut cursor_5 = tree.cursor().await.unwrap();
 
                         assert!(cursor_4.go_to(&[0, 0, 0, 0]).await.unwrap()); // ->
                         assert!(cursor_5.go_to(&[0, 1, 1, 1]).await.unwrap()); // <-
 
-                        for _ in 0..10000 {
+                        for _ in 0..amount {
                             assert!(
                                 cursor_4.jump(Direction::Right).await.unwrap()
                             );

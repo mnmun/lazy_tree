@@ -25,10 +25,15 @@ Each `node` in the `tree` contains two asynchronous `callbacks`, which are invok
 - `total` - invoked on the `node` to which the `cursor` has just moved. It ensures the `query` `callback` functions correctly by calculating the `total` number of child `nodes` for a given parent `node`. If this calculation has already been performed for this `node`, it is not repeated;
 - `query` - invoked on a parent `node` when the `cursor` moves to its child `node` that has not yet been created. It handles the creation of a new child `node` only when access to that `node` is actually required.
 
-When a `cursor` is created, the `total` `callback` is called on the `root` `node` as if the `cursor` had moved to it from the parent `node`.
+When a `cursor` is created, the `total` `callback` is called on the `root` `node` as if the `cursor` had moved to it from its parent `node`.
 
 In this way, a developer can define the logic for constructing a `tree` of lazily-created `nodes` tailored to their specific use case by implementing these `callbacks`.
 
+## Safety
+
+![](https://github.com/mnmun/images/blob/main/slippery.png?raw=true)
+
+Low-level, pointer-based memory management is verified with [`Miri`](https://github.com/rust-lang/miri), an interpreter that detects undefined behavior at runtime. Testing revealed no undefined behavior.
 
 ## Example
 
@@ -82,7 +87,8 @@ struct Bundle {
     left_child_index: usize,
 }
 
-// The `content` field can be accessed via cursor dereferencing: `**cursor`
+// The `content` field can be accessed via the `value()` method:
+// `**cursor.value().read().await`
 impl Deref for Bundle {
     type Target = &'static str;
 
@@ -244,19 +250,19 @@ let tree: Tree<Bundle, MyError> = make_tree(source);
 
 let mut cursor: Cursor<'_, Bundle, MyError> = tree.cursor().await.unwrap();
 assert_eq!(cursor.path(), &[0]);
-assert_eq!(**cursor, "ROOT");
+assert_eq!(**cursor.value().read().await, "ROOT");
 
 cursor.walk(Direction::Down(Target::First)).await.unwrap();
 assert_eq!(cursor.path(), &[0, 0]);
-assert_eq!(**cursor, "LEFT");
+assert_eq!(**cursor.value().read().await, "LEFT");
 
 cursor.walk(Direction::Right).await.unwrap();
 assert_eq!(cursor.path(), &[0, 1]);
-assert_eq!(**cursor, "RIGHT");
+assert_eq!(**cursor.value().read().await, "RIGHT");
 
 cursor.walk(Direction::Down(Target::First)).await.unwrap();
 assert_eq!(cursor.path(), &[0, 1, 0]);
-assert_eq!(**cursor, "RIGHT-RIGHT");
+assert_eq!(**cursor.value().read().await, "RIGHT-RIGHT");
 ```
 
 The complete example code can be found in the [examples/demo.rs](https://github.com/mnmun/lazy_tree/blob/main/examples/demo.rs) file and run with the command:

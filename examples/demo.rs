@@ -20,7 +20,8 @@ struct Bundle {
     left_child_index: usize,
 }
 
-// The `content` field can be accessed via cursor dereferencing: `**cursor`
+// The `content` field can be accessed via the `value()` method:
+// `**cursor.value().read().await`
 impl Deref for Bundle {
     type Target = &'static str;
 
@@ -160,17 +161,17 @@ async fn main() {
 
     let mut cursor: Cursor<'_, Bundle, MyError> = tree.cursor().await.unwrap();
     assert_eq!(cursor.path(), &[0]);
-    assert_eq!(**cursor, "ROOT");
+    assert_eq!(**cursor.value().read().await, "ROOT");
 
     assert!(cursor.walk(Direction::Down(Target::First)).await.unwrap());
     assert_eq!(cursor.path(), &[0, 0]);
-    assert_eq!(**cursor, "LEFT");
+    assert_eq!(**cursor.value().read().await, "LEFT");
 
     assert!(cursor.walk(Direction::Right).await.unwrap());
     assert_eq!(cursor.path(), &[0, 1]);
-    assert_eq!(**cursor, "RIGHT");
+    assert_eq!(**cursor.value().read().await, "RIGHT");
 
     assert!(cursor.walk(Direction::Down(Target::First)).await.unwrap());
     assert_eq!(cursor.path(), &[0, 1, 0]);
-    assert_eq!(**cursor, "RIGHT-RIGHT");
+    assert_eq!(**cursor.value().read().await, "RIGHT-RIGHT");
 }
